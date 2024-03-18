@@ -1,0 +1,8 @@
+.env
+Session.vim
+__pycache__/
+logs/
+pyproject.toml
+testdb.py
+testlisten.py
+*.json

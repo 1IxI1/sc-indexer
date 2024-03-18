@@ -1,0 +1,30 @@
+nominator#_ deposit:Coins pending_deposit:Coins = Nominator;
+nominators#_ _:(HashmapE 256 Nominator) = Nominators;  // 256 is the addr hash
+
+// using as list, with no meaningful value
+requested_withdrawals#_ _:(HashmapE 256 Cell) = WithdrawalRequests; // addr -> none
+
+vote#_ support:(## 1) vote_time:uint32 = Vote;
+votes#_ _:(HashmapE 256 Vote) = Votes;  // addr -> vote
+config_proposal_votings#_ _:(HashmapE 256 Votes) = Votings; // vote_hash -> votes
+
+pool_config#_ validator_address:bits256 validator_reward_share:uint16
+              max_nominators_count:uint16 min_validator_stake:Coins
+              min_nominator_stake:Coins
+          = PoolConfig;
+
+pool_data#_ state:uint8 nominators_count:uint16
+            stake_amount_sent:Coins validator_amount:Coins
+            config:^PoolConfig nominators:Nominators
+            withdraw_requests:WithdrawalRequests
+            stake_at:uint32 saved_validator_set_hash:uint256
+            validator_set_changes_count:uint8 validator_set_change_time:uint32
+            stake_held_for:uint32 config_proposal_votings:Votings
+        = Storage;
+
+d_comment#100 = LetterComment; // letter "d"
+w_comment#119 = LetterComment; // letter "w"
+y_comment#121 = LetterComment; // letter "y"
+n_comment#110 = LetterComment; // letter "n"
+
+comment_action#000000 letter:LetterComment = InternalMessageBody;
