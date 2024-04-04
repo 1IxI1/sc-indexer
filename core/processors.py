@@ -1,7 +1,7 @@
 from loguru import logger
 from pytoniq.liteclient import LiteClient
 
-from core.handler_types import DBSession
+from handlers.handler_types import DBSession
 from processors import handlers
 
 

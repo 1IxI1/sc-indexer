@@ -6,12 +6,11 @@ from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.orm import selectinload
 
 from contracts_db.database import Nominator, NominatorPool
-from core.handler_types import DBSession
+from handlers.handler_types import DBSession
 from core.utils import addr_hash_wc0_parse, empty_parse, nanostr, nominator_value_parse
 from mainnet_db.database import Message, MessageContent, Transaction, TransactionMessage
 
 
-# @SC_handler(code_hash="mj7BS8CY9rRAZMMFIiyuooAPF92oXuaoGYpwle3hDc8=")
 async def handle_nominator_pool(
     origin_db: DBSession,
     result_db: DBSession,
@@ -284,8 +283,6 @@ async def handle_nominator_pool(
             nominators.append(nominator)
 
         nominator_pool.nominators = nominators
-
-        # TODO: first delete all nominators in this pool?
 
         result_conn.add(nominator_pool)
 

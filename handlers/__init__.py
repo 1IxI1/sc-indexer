@@ -1,20 +1,9 @@
-# from processors.wallet_v3r2 import handle_wallet_v3
-# from processors.wallet_v4r2 import handle_wallet_v4
-
-# handlers = {
-#     "mj7BS8CY9rRAZMMFIiyuooAPF92oXuaoGYpwle3hDc8=": handle_nominator_pool,
-#     "/rX/aCDi/w2Ug+fg1iyBfYRniftK5YDIeIZtlZ2r1cA=": handle_wallet_v4,
-#     "hNr6RJ+Ypph3ibojI1gHK8D3bcRSQAKl0JGLmnXS1Zk=": handle_wallet_v3,
-# }
 from typing import Iterable, List, Tuple
 
-from core.handler_types import HandlerFunction, PackedHandler
-from processors.nominator_pool import nominator_pool_handler
-from processors.wallet_v3r2 import wallet_v3r2_handler
-from processors.wallet_v4r2 import wallet_v4r2_handler
-
-# handlers: dict[str, HandlerFunction] = {}
-
+from handlers.handler_types import HandlerFunction, PackedHandler
+from handlers.nominator_pool import nominator_pool_handler
+from handlers.wallet_v3r2 import wallet_v3r2_handler
+from handlers.wallet_v4r2 import wallet_v4r2_handler
 
 class Handlers:
     handlers: dict[str, HandlerFunction] = {}

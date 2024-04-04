@@ -6,14 +6,15 @@ from dotenv import load_dotenv
 from loguru import logger
 from pytoniq.liteclient import LiteClient
 from sqlalchemy import select, text
+from sqlalchemy.schema import CreateSchema
 
 from contracts_db.database import Base as ContractsBase
 from core.connections import SessionMaker_Origin, SessionMaker_Result, engine_result
 from core.localdb import localdb
 from core.processors import call_handler
 from core.settings import settings
-from processors import handlers as contract_handlers
 from mainnet_db.database import LatestAccountState
+from handlers import handlers as contract_handlers
 
 load_dotenv()
 
@@ -111,12 +112,21 @@ async def run():
         )
 
 
-async def main():
-    logger.warning("Starting Smart Contracts Indexer")
-    async with engine_result.begin() as conn:  # TODO: maybe put into connections
+async def connect_db():
+    async with engine_result.begin() as conn:
+        await conn.execute(CreateSchema("account_types", if_not_exists=True))
+        await conn.execute(CreateSchema("subaccount_types", if_not_exists=True))
         await conn.run_sync(ContractsBase.metadata.create_all)
 
-    await lite_client.connect()  # LiteClient
+
+async def main():
+    logger.critical(
+        "Starting Smart Contracts Indexer from %s db into %s db"
+        % (settings.db_origin_name, settings.db_result_name)
+    )
+
+    await connect_db()
+    await lite_client.connect()
 
     while True:
         await run()

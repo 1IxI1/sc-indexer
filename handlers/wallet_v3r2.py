@@ -5,7 +5,7 @@ from pytoniq.liteclient import LiteClient
 from sqlalchemy import delete, select
 
 from contracts_db.database import Wallet
-from core.handler_types import DBSession
+from handlers.handler_types import DBSession
 
 
 async def handle_wallet_v3(
