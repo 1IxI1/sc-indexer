@@ -4,6 +4,7 @@ With accounting.
 https://github.com/ton-blockchain/nominator-pool/
 """
 
+import asyncio
 import base64
 import math
 from pprint import pprint
@@ -157,6 +158,7 @@ async def handle_nominator_pool(
 
     result_conn.add(pool)
     await result_conn.commit()
+    logger.info("Updated pool " + pool_address_str)
 
     # then additional value checks
     if not nominators_cell:
@@ -225,19 +227,89 @@ async def handle_nominator_pool(
         .join(Transaction, TransactionMessage.transaction_hash == Transaction.hash)
     )
     q = q.filter(Message.created_at > processing_from_time)
+    q = q.distinct(Message.created_lt)
     q = q.order_by(Message.created_lt)
 
     query_msgs_to_pool = q.filter(Message.destination == pool_address_str)
     query_msgs_from_pool = q.filter(Message.source == pool_address_str)
 
     res_to_pool = await origin_conn.execute(query_msgs_to_pool)
-    res_from_pool = await origin_conn.execute(query_msgs_from_pool)
     msgs_to_pool = res_to_pool.all()
+
+    res_from_pool = await origin_conn.execute(query_msgs_from_pool)
     msgs_from_pool = res_from_pool.all()
 
-    bookings = {}
+    bookings = []
     withdrawal_requests = {}
 
+    async def process_recover_stake(_msg: Message, _block_seqno: int):
+        assert (  # came from elector
+            _msg.source
+            == "-1:3333333333333333333333333333333333333333333333333333333333333333"
+        )
+
+        wc = -1
+        shard = -9223372036854775808
+        prev_block_seqno = _block_seqno - 5  # 5 blocks before
+
+        q = select(Block).filter(Block.seqno == prev_block_seqno, Block.workchain == wc)
+        res = await origin_conn.execute(q)
+        block = res.scalar()
+        if not block:
+            logger.debug("No block at %s" % prev_block_seqno)
+            return
+
+        root_hash = base64.b64decode(block.root_hash)
+        file_hash = base64.b64decode(block.file_hash)
+
+        on_block = BlockIdExt(wc, shard, prev_block_seqno, root_hash, file_hash)
+
+        res = await lite_client.run_get_method(
+            pool_address_str, "get_pool_data", [], on_block
+        )
+        stake_amount_sent_before = res[2]
+        validator_share = res[5]
+        nominators_before = res[9]
+
+        _nominators_dict = HashMap.parse(
+            dict_cell=nominators_before.begin_parse(),
+            key_length=256,
+            key_deserializer=addr_hash_wc0_parse,
+            value_deserializer=nominator_value_parse,
+        )
+        if not _nominators_dict:
+            logger.debug("No nominators at %s" % on_block)
+            return
+
+        reward = _msg.value - stake_amount_sent_before
+        validator_reward = int(reward * validator_share / 10000)
+        nominators_reward = reward - validator_reward
+
+        logger.debug(
+            f"Value: {nanostr(_msg.value)}, stake: {nanostr(stake_amount_sent_before)}, reward: {nanostr(reward)}"
+        )
+        logger.debug(f"Block time: {block.gen_utime}, income time: {_msg.created_at}")
+
+        logger.debug(
+            "Found income %s for %s nominators"
+            % (nanostr(reward), len(_nominators_dict))
+        )
+        for nominator, (balance, pending_balance) in _nominators_dict.items():
+            share = balance / stake_amount_sent_before
+            his_reward = int(share * nominators_reward)
+            bookings.append(
+                {
+                    "lt": _msg.created_lt,
+                    "utime": _msg.created_at,
+                    "subaccount_address": nominator.to_str(False).upper(),
+                    "debit": his_reward,
+                    "credit": 0,
+                    "type": "nominator_income",
+                }
+            )
+        # end of function
+
+    tasks = []
     for msg, body, descr, block_seqno in msgs_to_pool:
         logger.debug(f"     new tx (to) with lt {msg.created_lt} at {msg.created_at}")
         try:
@@ -257,13 +329,16 @@ async def handle_nominator_pool(
         if op == 0:
             first_letter = chr(body_boc.load_uint(8))[0]
             if first_letter == "d":
-                bookings[msg.created_lt] = {
-                    "utime": msg.created_at,
-                    "subaccount_address": msg.source,
-                    "debit": msg.value - 10**9,
-                    "credit": 0,
-                    "type": "nominator_deposit",
-                }
+                bookings.append(
+                    {
+                        "lt": msg.created_lt,
+                        "utime": msg.created_at,
+                        "subaccount_address": msg.source,
+                        "debit": msg.value - 10**9,
+                        "credit": 0,
+                        "type": "nominator_deposit",
+                    }
+                )
                 logger.info(
                     "Deposit with value %s at %s for %s on %s"
                     % (nanostr(msg.value), msg.created_at, msg.source, pool_address_str)
@@ -277,69 +352,23 @@ async def handle_nominator_pool(
                     "Withdraw req at %s from %s on %s"
                     % (msg.created_at, msg.source, pool_address_str)
                 )
+
         elif op == 0xF96F7324:  # recover_stake_ok (i.e. income)
-            assert (  # came from elector
-                msg.source
-                == "-1:3333333333333333333333333333333333333333333333333333333333333333"
-            )
+            tasks.append(process_recover_stake(msg, block_seqno))
+            if len(tasks) >= 5:
+                await asyncio.gather(*tasks)
+                tasks = []
 
-            wc = -1
-            shard = -9223372036854775808
-            prev_block_seqno = block_seqno - 1
-
-            q = select(Block).filter(
-                Block.seqno == prev_block_seqno, Block.workchain == wc
-            )
-            res = await origin_conn.execute(q)
-            block = res.scalar()
-            if not block:
-                logger.info("No block at %s" % prev_block_seqno)
-                continue
-
-            root_hash = base64.b64decode(block.root_hash)
-            file_hash = base64.b64decode(block.file_hash)
-
-            on_block = BlockIdExt(wc, shard, prev_block_seqno, root_hash, file_hash)
-
-            res = await lite_client.run_get_method(
-                pool_address_str, "get_pool_data", [], on_block
-            )
-            stake_amount_sent_before = res[2]
-            validator_share = res[5]
-            nominators_before = res[9]
-
-            _nominators_dict = HashMap.parse(
-                dict_cell=nominators_before.begin_parse(),
-                key_length=256,
-                key_deserializer=addr_hash_wc0_parse,
-                value_deserializer=nominator_value_parse,
-            )
-            if not _nominators_dict:
-                logger.info("No nominators at %s" % on_block)
-                continue
-
-            reward = msg.value - stake_amount_sent_before
-            validator_reward = int(reward * validator_share / 10000)
-            nominators_reward = reward - validator_reward
-
-            for nominator, (balance, pending_balance) in _nominators_dict.items():
-                share = balance / stake_amount_sent_before
-                his_reward = int(share * nominators_reward)
-                bookings[msg.created_lt] = {
-                    "utime": msg.created_at,
-                    "subaccount_address": nominator.to_str(False).upper(),
-                    "debit": his_reward,
-                    "credit": 0,
-                    "type": "nominator_income",
-                }
+    if tasks:
+        await asyncio.gather(*tasks)
 
     for msg, body, descr, block_seqno in msgs_from_pool:
         logger.debug(
             f"     new tx (from pool) with lt {msg.created_lt} at {msg.created_at}"
         )
         # pool sends withdrawals in bounceable mode
-        if descr["bounce"] is not True:
-            logger.debug(f"Non-bounceable, skip")
+        if descr["bounce"] is not False:
+            logger.debug(f"Bounceable, skip")
             continue
         # and without body (empty cell). excesses will have op
         if body != "te6cckEBAQEAAgAAAEysuc0=":
@@ -370,15 +399,18 @@ async def handle_nominator_pool(
             % (msg.source, msg.value, msg.destination, msg.created_at)
         )
 
-        bookings[msg.created_lt] = {
-            "utime": msg.created_at,
-            "subaccount_address": msg.source,
-            "debit": 0,
-            "credit": msg.value,
-            "type": "nominator_withdrawal",
-        }
-    # sort bookings by lt
-    bookings = dict(sorted(bookings.items()))
+        bookings.append(
+            {
+                "lt": msg.created_lt,
+                "utime": msg.created_at,
+                "subaccount_address": msg.source,
+                "debit": 0,
+                "credit": msg.value,
+                "type": "nominator_withdrawal",
+            }
+        )
+    # sort bookings by utime and lt
+    bookings = sorted(bookings, key=lambda b: (b["utime"], b["lt"]))
     pprint(bookings)
 
 
