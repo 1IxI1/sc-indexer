@@ -6,7 +6,9 @@ https://github.com/ton-blockchain/nominator-pool/
 
 import asyncio
 import base64
+import json
 import math
+from hashlib import sha256
 from pprint import pprint
 
 from loguru import logger
@@ -111,15 +113,15 @@ async def handle_nominator_pool(
     pool_address = Address(pool_address_str)
 
     try:
-        account = await lite_client.get_account_state(pool_address)
-        if not account.state.state_init or not account.state.state_init.data:
+        pool_account = await lite_client.get_account_state(pool_address)
+        if not pool_account.state.state_init or not pool_account.state.state_init.data:
             raise Exception("No data in state init")
     except Exception:
         logger.info("No account state init was found for pool " + pool_address_str)
         await delete_pool_with_nominators()
         return
 
-    data = account.state.state_init.data
+    data = pool_account.state.state_init.data
 
     (
         state,
@@ -138,23 +140,27 @@ async def handle_nominator_pool(
         .join(NominatorPool, NominatorPool.account_id == Account.account_id)
         .filter(Account.account == pool_address_str)
     )
-    res = await result_conn.execute(query)
-    account, pool = res.all()[0]
 
-    if not account:
-        account = Account(
+    res = (await result_conn.execute(query)).all()
+
+    if res:
+        pool_account, pool = res[0]
+    else:
+        pool_account = Account(
             account=pool_address_str,
             account_type="nominator_pool",
             balance=balance,
         )
-        result_conn.add(account)
+        result_conn.add(pool_account)
         await result_conn.flush()
-        pool = NominatorPool(account_id=account.account_id)
+        pool = NominatorPool(account_id=pool_account.account_id)
 
-    account.balance = balance
+    pool_account.balance = balance
     pool.validator_amount = validator_amount
     pool.stake_amount_sent = stake_amount_sent
     pool.nominators_count = nominators_count
+
+    pool_id_in_accouts = pool.account_id
 
     result_conn.add(pool)
     await result_conn.commit()
@@ -205,14 +211,6 @@ async def handle_nominator_pool(
 
     # probably, it needs some sorting. so we first compile data in dicts
     # and at the end sort and write into db
-
-    nominators = {}
-    for nominator, (balance, pending_balance) in nominators_dict.items():
-        subaccount_typed = Nominator(
-            balance=balance,
-            pending_balance=pending_balance,
-        )
-        nominators[nominator] = subaccount_typed
 
     q = (
         select(
@@ -355,7 +353,7 @@ async def handle_nominator_pool(
 
         elif op == 0xF96F7324:  # recover_stake_ok (i.e. income)
             tasks.append(process_recover_stake(msg, block_seqno))
-            if len(tasks) >= 5:
+            if len(tasks) >= 10:
                 await asyncio.gather(*tasks)
                 tasks = []
 
@@ -367,16 +365,20 @@ async def handle_nominator_pool(
             f"     new tx (from pool) with lt {msg.created_lt} at {msg.created_at}"
         )
         # pool sends withdrawals in bounceable mode
-        if descr["bounce"] is not False:
-            logger.debug(f"Bounceable, skip")
+        if not msg.destination.startswith("0:"):
             continue
-        # and without body (empty cell). excesses will have op
-        if body != "te6cckEBAQEAAgAAAEysuc0=":
-            logger.debug(f"Non-empty body, skip")
+        if descr["bounce"] is True:
+            logger.debug(f"Bounceable, skip")
             continue
         # and it's more than 1 TON
         if msg.value < 10**9:
-            logger.debug(f"Less than 1 TON, skip")
+            logger.debug(f"Less than 1 TON ({nanostr(msg.value)}), skip")
+            continue
+        # and without body (empty cell). excesses will have op
+        if body != "te6cckEBAQEAAgAAAEysuc0=":
+            logger.debug(
+                f"Non-empty body (value {nanostr(msg.value)}) (body {body}), skip"
+            )
             continue
 
         if not msg.destination in withdrawal_requests:
@@ -388,17 +390,15 @@ async def handle_nominator_pool(
         max_at = msg.created_at
         for req_at in withdrawal_requests[msg.destination]:
             if req_at > min_at and req_at <= max_at:
-                logger.debug(f"Found request from {msg.destination} at {req_at}")
                 break
         else:
             logger.debug(f"No requests from {msg.destination} in last 36 hours, skip")
             continue
-
-        logger.debug(
+        # if found:
+        logger.info(
             "Found withdrawal msg from pool %s, amount %s, receiver %s at %s"
             % (msg.source, msg.value, msg.destination, msg.created_at)
         )
-
         bookings.append(
             {
                 "lt": msg.created_lt,
@@ -409,9 +409,122 @@ async def handle_nominator_pool(
                 "type": "nominator_withdrawal",
             }
         )
+
     # sort bookings by utime and lt
     bookings = sorted(bookings, key=lambda b: (b["utime"], b["lt"]))
-    pprint(bookings)
+
+    # now we have complete bookings and we'll insert all of them + nominator in db
+
+    # first, create all subaccounts for all nominators
+    q = (
+        select(SubAccount, Nominator)
+        .select_from(SubAccount)
+        .join(Nominator, Nominator.subaccount_id == SubAccount.subaccount_id)
+        .filter(SubAccount.parent_account_id == pool_id_in_accouts)
+    )
+    res = await result_conn.execute(q)
+    existing_subaccounts = res.all()
+
+    all_subaccounts = {}  # including new below
+    for sub in existing_subaccounts:
+        all_subaccounts[sub[0].owner] = {
+            "subaccount": sub[0],
+            "nominator": sub[1],
+        }
+
+    # update active nominators
+    new_active_nominators = []
+    for nominator, (balance, pending_balance) in nominators_dict.items():
+        nominator_raw = nominator.to_str(False).upper()
+        if not nominator_raw in all_subaccounts:
+            new_subaccount = SubAccount(
+                owner=nominator_raw,
+                subaccount_type="pool_nominator",
+                parent_account_id=pool_id_in_accouts,
+            )
+            result_conn.add(new_subaccount)
+            await result_conn.flush()  # for subaccount_id
+
+            new_nominator = Nominator(
+                subaccount_id=new_subaccount.subaccount_id,
+                balance=balance,
+                pending_balance=pending_balance,
+            )
+            result_conn.add(new_nominator)  # no flush here
+
+            all_subaccounts[nominator_raw] = {
+                "subaccount": new_subaccount,
+                "nominator": new_nominator,
+            }
+        else:
+            # update data
+            all_subaccounts[nominator_raw]["nominator"].balance = balance
+            all_subaccounts[nominator_raw][
+                "nominator"
+            ].pending_balance = pending_balance
+
+        new_active_nominators.append(nominator.to_str(False).upper())
+
+    # make old active nominators inactive
+    for nominator_addr in all_subaccounts:
+        if nominator_addr not in new_active_nominators:
+            all_subaccounts[nominator_addr]["nominator"].balance = 0
+            all_subaccounts[nominator_addr]["nominator"].pending_balance = 0
+
+    # create new nominators
+    for record in bookings:
+        if not record["subaccount_address"] in all_subaccounts:
+            new_subaccount = SubAccount(
+                owner=record["subaccount_address"],
+                subaccount_type="pool_nominator",
+                parent_account_id=pool_id_in_accouts,
+            )
+            result_conn.add(new_subaccount)
+            await result_conn.flush()
+            new_nominator = Nominator(
+                subaccount_id=new_subaccount.subaccount_id,
+                balance=0,
+                pending_balance=0,
+            )
+            result_conn.add(new_nominator)
+            all_subaccounts[record["subaccount_address"]] = {
+                "subaccount": new_subaccount,
+                "nominator": new_nominator,
+            }
+
+    # insert bookings and subaccount nominators
+    for record in bookings:
+        result_conn.add(all_subaccounts[record["subaccount_address"]]["subaccount"])
+        result_conn.add(all_subaccounts[record["subaccount_address"]]["nominator"])
+
+        subaccount_id = all_subaccounts[record["subaccount_address"]][
+            "subaccount"
+        ].subaccount_id
+
+        record["account_id"] = pool_id_in_accouts
+        record["subaccount_id"] = subaccount_id
+        record_hash = sha256(json.dumps(record, sort_keys=True).encode())
+        record_hash = base64.b64encode(record_hash.digest()).decode("ascii")
+
+        res = await result_conn.execute(
+            select(Booking).filter_by(booking_hash=record_hash)
+        )
+        if res.scalar():  # already exists
+            continue
+
+        booking = Booking(
+            booking_hash=record_hash,
+            account_id=pool_id_in_accouts,
+            subaccount_id=subaccount_id,
+            booking_lt=record["lt"],
+            booking_utime=record["utime"],
+            booking_type=record["type"],
+            credit=record["credit"],
+            debit=record["debit"],
+        )
+        result_conn.add(booking)
+
+    await result_conn.commit()
 
 
 nominator_pool_handler = (

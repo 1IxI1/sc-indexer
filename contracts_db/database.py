@@ -48,7 +48,7 @@ class SubAccount(Base):
     __tablename__ = "subaccounts"
 
     subaccount_id = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    owner = mapped_column(String)
+    owner = mapped_column(String)  # address, public key or smth
     subaccount_type = mapped_column(SubAccountType)
     parent_account_id = mapped_column(BigInteger, ForeignKey("accounts.account_id"))
 
@@ -62,6 +62,7 @@ class Booking(Base):
     __tablename__ = "bookings"
 
     booking_id = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    booking_hash = mapped_column(String, primary_key=True)
     account_id = mapped_column(BigInteger, ForeignKey("accounts.account_id"))
     subaccount_id = mapped_column(BigInteger, ForeignKey("subaccounts.subaccount_id"))
     booking_type = mapped_column(BookingType)
