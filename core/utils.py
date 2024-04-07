@@ -162,9 +162,3 @@ def empty_parse(src: Slice) -> int:
     return 1
 
 
-def nominator_value_parse(src: Slice) -> tuple[int, int]:
-    # nominator#_ deposit:Coins pending_deposit:Coins = Nominator;
-    deposit = src.load_coins() or 0
-    pending_deposit = src.load_coins() or 0
-    return deposit, pending_deposit
-

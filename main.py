@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import sys
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -13,17 +14,25 @@ from core.connections import SessionMaker_Origin, SessionMaker_Result, engine_re
 from core.localdb import localdb
 from core.processors import call_handler
 from core.settings import settings
-from mainnet_db.database import LatestAccountState
 from handlers import handlers as contract_handlers
+from mainnet_db.database import LatestAccountState
 
 load_dotenv()
 
 os.makedirs("logs", exist_ok=True)
-logger.add("logs/sci_{time}.log", level="DEBUG")
+
+logger.add(
+    "logs/sci_{time}.log",
+    level="DEBUG",
+    # format="{time} {level} {message}",
+    format="{time:YYYY-MM-DD at HH:mm:ss} | {file}:{line} | {level} | {message}",
+    backtrace=True,
+    diagnose=True,
+)
 
 # use LS to get contracts' data
-config = json.loads(open("dedicated-config.json").read())
-lite_client = LiteClient.from_config(config, timeout=10)
+config = json.loads(open("vip-archive-config.json").read())
+lite_client = LiteClient.from_config(config, timeout=10)  # i=2 for mainnet config
 
 print(contract_handlers.keys())
 
@@ -52,10 +61,10 @@ async def run():
             .filter(LatestAccountState.code_hash.in_(contract_types))
             .filter(LatestAccountState.timestamp > localdb.index_second)
             .order_by(LatestAccountState.timestamp)
-            # .filter( # DEBUG
-            #     LatestAccountState.account
-            #     == "-1:56CB0E4CDD07AD4A608E0A4F4A5972552139A63A16AA4A620E27056FE9F2C552"
-            # )
+            .filter(  # DEBUG
+                LatestAccountState.account
+                == "-1:1189458EEA400D0C5DC5B1A22EDA8DD009BABA5465B2A99C5145733C07D9916C"
+            )
         )
 
         res = await origin_db.execute(query)
@@ -76,6 +85,7 @@ async def run():
                 balance,
                 data_hash,
                 lite_client,
+                localdb.index_second,
             )
         )
 
@@ -90,7 +100,7 @@ async def run():
                     "Something went wrong on indexing around timestamp",
                     processing_timestamp,
                 )
-                logger.error(f"Saving second {localdb.index_second} to local db")
+                logger.error(f"Saving second {processing_timestamp} to local db")
                 localdb.index_second = processing_timestamp
                 localdb.write()
                 processing_timestamp = 0
@@ -127,6 +137,12 @@ async def main():
 
     await connect_db()
     await lite_client.connect()
+
+    res = await lite_client.run_get_method(
+        "-1:56CB0E4CDD07AD4A608E0A4F4A5972552139A63A16AA4A620E27056FE9F2C552",
+        "get_pool_data",
+        [],
+    )
 
     while True:
         await run()

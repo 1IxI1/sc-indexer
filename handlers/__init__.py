@@ -1,9 +1,10 @@
 from typing import Iterable, List, Tuple
 
 from handlers.handler_types import HandlerFunction, PackedHandler
-from handlers.nominator_pool import nominator_pool_handler
-from handlers.wallet_v3r2 import wallet_v3r2_handler
-from handlers.wallet_v4r2 import wallet_v4r2_handler
+from handlers.new_nominator_pool import nominator_pool_handler
+# from handlers.wallet_v3r2 import wallet_v3r2_handler
+# from handlers.wallet_v4r2 import wallet_v4r2_handler
+
 
 class Handlers:
     handlers: dict[str, HandlerFunction] = {}
@@ -28,4 +29,5 @@ class Handlers:
 
 
 handlers = Handlers()
-handlers.register([nominator_pool_handler, wallet_v4r2_handler, wallet_v3r2_handler])
+# handlers.register([nominator_pool_handler, wallet_v4r2_handler, wallet_v3r2_handler])
+handlers.register(nominator_pool_handler)

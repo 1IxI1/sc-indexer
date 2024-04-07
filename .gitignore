@@ -7,3 +7,5 @@ pyproject.toml
 testdb.py
 testlisten.py
 *.json
+test
+test_get_method.py

@@ -2,7 +2,7 @@ from loguru import logger
 from pytoniq.liteclient import LiteClient
 
 from handlers.handler_types import DBSession
-from processors import handlers
+from handlers import handlers
 
 
 async def call_handler(
@@ -13,11 +13,12 @@ async def call_handler(
     balance: int,
     data_hash: str,
     client: LiteClient,
+    utime: int,
 ):
     if code_hash in handlers:
         handler_function = handlers[code_hash]
         await handler_function(
-            origin_db, result_db, address, balance, data_hash, client
+            origin_db, result_db, address, balance, data_hash, client, utime
         )
     else:
         pass
