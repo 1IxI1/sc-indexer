@@ -62,13 +62,17 @@ def shard_type(value):
     return int_to_hex(value, length=64, signed=True).upper() if value else None
 
 
-class Nominator(BaseModel):
-    account: str
+class NominatorInPool(BaseModel):
     pool_address: str
     balance: int
-    deposit: int
-    withdrawn_rewards: int
-    total_rewards: int
+    pending_balance: int
+
+
+class BookingMinimal(BaseModel):
+    utime: int
+    booking_type: str
+    debit: int
+    credit: int
 
 
 class NominatorPool(BaseModel):

@@ -169,19 +169,19 @@ async def handle_nominator_pool(
     # then additional value checks
     if not nominators_cell:
         logger.info("No nominators_cell in pool " + pool_address_str)
+        nominators_dict = None
         # await delete_pool_with_nominators()
-        return
-
-    nominators_dict = HashMap.parse(
-        dict_cell=nominators_cell.begin_parse(),
-        key_length=256,
-        key_deserializer=addr_hash_wc0_parse,
-        value_deserializer=nominator_value_parse,
-    )
-    if not nominators_dict:
-        logger.info("Invalid nominators_dict in pool " + pool_address_str)
-        # await delete_pool_with_nominators()
-        return
+    else:
+        nominators_dict = HashMap.parse(
+            dict_cell=nominators_cell.begin_parse(),
+            key_length=256,
+            key_deserializer=addr_hash_wc0_parse,
+            value_deserializer=nominator_value_parse,
+        )
+        if not nominators_dict:
+            logger.info("Invalid nominators_dict in pool " + pool_address_str)
+            # await delete_pool_with_nominators()
+            return
 
     if withdraw_requests_cell:
         # using as list, with no meaningful value
@@ -288,10 +288,10 @@ async def handle_nominator_pool(
         )
         logger.debug(f"Block time: {block.gen_utime}, income time: {_msg.created_at}")
 
-        logger.debug(
-            "Found income %s for %s nominators"
-            % (nanostr(reward), len(_nominators_dict))
-        )
+        # logger.debug(
+        #     "Found income %s for %s nominators"
+        #     % (nanostr(reward), len(_nominators_dict))
+        # )
         for nominator, (balance, pending_balance) in _nominators_dict.items():
             share = balance / stake_amount_sent_before
             his_reward = int(share * nominators_reward)
@@ -309,13 +309,15 @@ async def handle_nominator_pool(
 
     tasks = []
     for msg, body, descr, block_seqno in msgs_to_pool:
-        logger.debug(f"     new tx (to) with lt {msg.created_lt} at {msg.created_at}")
+        # logger.debug(f"     new tx (to) with lt {msg.created_lt} at {msg.created_at}")
         try:
             exit_code = (  # bitwise or to catch any other than 0
                 descr["compute_ph"]["exit_code"] | descr["action"]["result_code"]
             )
         except:
-            logger.debug(f"Failed to parse tx description: {descr}")
+            logger.debug(
+                f"Failed to parse tx description at {msg.created_lt} on {pool_address_str}"
+            )
             continue
 
         if exit_code != 0:
@@ -323,7 +325,10 @@ async def handle_nominator_pool(
             continue
 
         body_boc = Cell.from_boc(body)[0].begin_parse()
-        op = body_boc.load_uint(32)
+        try:
+            op = body_boc.load_uint(32)
+        except:
+            continue
         if op == 0:
             first_letter = chr(body_boc.load_uint(8))[0]
             if first_letter == "d":
@@ -361,9 +366,9 @@ async def handle_nominator_pool(
         await asyncio.gather(*tasks)
 
     for msg, body, descr, block_seqno in msgs_from_pool:
-        logger.debug(
-            f"     new tx (from pool) with lt {msg.created_lt} at {msg.created_at}"
-        )
+        # logger.debug(
+        #     f"     new tx (from pool) with lt {msg.created_lt} at {msg.created_at}"
+        # )
         # pool sends withdrawals in bounceable mode
         if not msg.destination.startswith("0:"):
             continue
@@ -434,36 +439,37 @@ async def handle_nominator_pool(
 
     # update active nominators
     new_active_nominators = []
-    for nominator, (balance, pending_balance) in nominators_dict.items():
-        nominator_raw = nominator.to_str(False).upper()
-        if not nominator_raw in all_subaccounts:
-            new_subaccount = SubAccount(
-                owner=nominator_raw,
-                subaccount_type="pool_nominator",
-                parent_account_id=pool_id_in_accouts,
-            )
-            result_conn.add(new_subaccount)
-            await result_conn.flush()  # for subaccount_id
+    if nominators_dict:
+        for nominator, (balance, pending_balance) in nominators_dict.items():
+            nominator_raw = nominator.to_str(False).upper()
+            if not nominator_raw in all_subaccounts:
+                new_subaccount = SubAccount(
+                    owner=nominator_raw,
+                    subaccount_type="pool_nominator",
+                    parent_account_id=pool_id_in_accouts,
+                )
+                result_conn.add(new_subaccount)
+                await result_conn.flush()  # for subaccount_id
 
-            new_nominator = Nominator(
-                subaccount_id=new_subaccount.subaccount_id,
-                balance=balance,
-                pending_balance=pending_balance,
-            )
-            result_conn.add(new_nominator)  # no flush here
+                new_nominator = Nominator(
+                    subaccount_id=new_subaccount.subaccount_id,
+                    balance=balance,
+                    pending_balance=pending_balance,
+                )
+                result_conn.add(new_nominator)  # no flush here
 
-            all_subaccounts[nominator_raw] = {
-                "subaccount": new_subaccount,
-                "nominator": new_nominator,
-            }
-        else:
-            # update data
-            all_subaccounts[nominator_raw]["nominator"].balance = balance
-            all_subaccounts[nominator_raw][
-                "nominator"
-            ].pending_balance = pending_balance
+                all_subaccounts[nominator_raw] = {
+                    "subaccount": new_subaccount,
+                    "nominator": new_nominator,
+                }
+            else:
+                # update data
+                all_subaccounts[nominator_raw]["nominator"].balance = balance
+                all_subaccounts[nominator_raw][
+                    "nominator"
+                ].pending_balance = pending_balance
 
-        new_active_nominators.append(nominator.to_str(False).upper())
+            new_active_nominators.append(nominator.to_str(False).upper())
 
     # make old active nominators inactive
     for nominator_addr in all_subaccounts:

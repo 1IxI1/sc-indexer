@@ -61,10 +61,10 @@ async def run():
             .filter(LatestAccountState.code_hash.in_(contract_types))
             .filter(LatestAccountState.timestamp > localdb.index_second)
             .order_by(LatestAccountState.timestamp)
-            .filter(  # DEBUG
-                LatestAccountState.account
-                == "-1:1189458EEA400D0C5DC5B1A22EDA8DD009BABA5465B2A99C5145733C07D9916C"
-            )
+            # .filter(  # DEBUG
+            #     LatestAccountState.account
+            #     == "-1:1189458EEA400D0C5DC5B1A22EDA8DD009BABA5465B2A99C5145733C07D9916C"
+            # )
         )
 
         res = await origin_db.execute(query)

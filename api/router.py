@@ -23,7 +23,7 @@ async def get_db():
         yield db
 
 
-@router.get("/getNominator", response_model=List[schemas.Nominator])
+@router.get("/getNominator", response_model=List[schemas.NominatorInPool])
 async def get_nominator_method(
     nominator: str = Query(
         description="The nominator address. Can be sent in hex, base64 or base64url form.",
@@ -41,7 +41,52 @@ async def get_nominator_method(
     if nominator_addr is None:
         raise HTTPException(status_code=400, detail="Invalid nominator address")
     pool_addr = address_to_raw(pool)
+
     res = await crud.get_nominator(db, nominator_addr, pool_addr)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Nominator not found")
+    return res
+
+
+# ### getNominatorBookings
+
+# **Arguments:**
+
+# - `nominator_address: string`
+# - `pool_address: string`
+# - `limit: number`
+# - `limit_from_top: boolean` - if _true_, returns not the _first N_ records, but _N last_ records.
+# - `from_time: number`
+# - `to_time: number`
+
+# _Returns nominator bookings (debits and credits) in specified pool._
+@router.get("/getNominatorBookings", response_model=List[schemas.BookingMinimal])
+async def get_nominator_bookings_method(
+    nominator: str = Query(
+        description="The nominator address. Can be sent in hex, base64 or base64url form.",
+    ),
+    pool: str = Query(
+        default=None,
+        description="The pool address in which nominator stakes coins. Can be sent in hex, base64 or base64url form.",
+    ),
+    limit: Optional[int] = Query(
+        default=100,
+        description="The number of records to return. If not specified, returns 100 records.",
+    ),
+    limit_from_top: Optional[bool] = Query(
+        default=False,
+)):
+    """
+    Get nominator data in given pool (the only in list) or, if pool is not specified, in all pools where nominator stakes.
+    """
+    nominator_addr = address_to_raw(nominator)
+    if nominator_addr is None:
+        raise HTTPException(status_code=400, detail="Invalid nominator address")
+    pool_addr = address_to_raw(pool)
+
+    res = await crud.get_nominator_bookings(
+        nominator_addr, pool_addr, limit, limit_from_top
+    )
     if res is None:
         raise HTTPException(status_code=404, detail="Nominator not found")
     return res
@@ -64,3 +109,5 @@ async def get_pool_method(
     if not pool:
         raise HTTPException(status_code=404, detail="Pool not found")
     return schemas.NominatorPool.model_validate(pool, from_attributes=True)
+
+@
