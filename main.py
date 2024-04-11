@@ -3,6 +3,7 @@ import json
 import os
 import sys
 
+import aiometer
 from dotenv import load_dotenv
 from loguru import logger
 from pytoniq.liteclient import LiteClient

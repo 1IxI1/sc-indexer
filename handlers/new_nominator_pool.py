@@ -269,6 +269,9 @@ async def handle_nominator_pool(
         validator_share = res[5]
         nominators_before = res[9]
 
+        if not nominators_before:
+            return
+
         _nominators_dict = HashMap.parse(
             dict_cell=nominators_before.begin_parse(),
             key_length=256,
@@ -330,7 +333,10 @@ async def handle_nominator_pool(
         except:
             continue
         if op == 0:
-            first_letter = chr(body_boc.load_uint(8))[0]
+            try:
+                first_letter = chr(body_boc.load_uint(8))[0]
+            except:
+                continue
             if first_letter == "d":
                 bookings.append(
                     {
@@ -408,7 +414,7 @@ async def handle_nominator_pool(
             {
                 "lt": msg.created_lt,
                 "utime": msg.created_at,
-                "subaccount_address": msg.source,
+                "subaccount_address": msg.destination,
                 "debit": 0,
                 "credit": msg.value,
                 "type": "nominator_withdrawal",
