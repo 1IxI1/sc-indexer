@@ -21,7 +21,7 @@ from sqlalchemy.orm import selectinload
 
 from contracts_db.database import Account, Booking, Nominator, NominatorPool, SubAccount
 from core.utils import addr_hash_wc0_parse, empty_parse, nanostr
-from handlers.handler_types import DBSession
+from handlers.handler_types import DBSession, HandlerArgs
 from mainnet_db.database import (
     Block,
     Message,
@@ -72,24 +72,16 @@ def parse_pool(data: Cell):
     )
 
 
-async def handler(
-    origin_db: DBSession,
-    result_db: DBSession,
-    pool_address_str: str,
-    balance: int,
-    data_hash: str,
-    lite_client: LiteClient,
-    utime: int,
-):
-    async with origin_db() as origin_conn, result_db() as result_conn:
+async def handler(args: HandlerArgs):
+    async with args.origin_db() as origin_conn, args.result_db() as result_conn:
         await handle_nominator_pool(
             origin_conn,
             result_conn,
-            pool_address_str,
-            balance,
-            data_hash,
-            lite_client,
-            utime,
+            args.address,
+            args.balance,
+            args.data_hash,
+            args.lite_client,
+            args.utime,
         )
 
 
@@ -166,6 +158,7 @@ async def handle_nominator_pool(
     await result_conn.commit()
     logger.info("Updated pool " + pool_address_str)
 
+    logger.debug("here on nominators_cell")
     # then additional value checks
     if not nominators_cell:
         logger.info("No nominators_cell in pool " + pool_address_str)
@@ -183,6 +176,7 @@ async def handle_nominator_pool(
             # await delete_pool_with_nominators()
             return
 
+    logger.debug("here on withdraw_requests_cell")
     if withdraw_requests_cell:
         # using as list, with no meaningful value
         # requested_withdrawals#_ _:(HashmapE 256 Cell) = WithdrawalRequests; // addr -> none
@@ -196,6 +190,7 @@ async def handle_nominator_pool(
             logger.info("Invalid withdraw_requests in pool " + pool_address_str)
             # await delete_pool_with_nominators()
             return
+    logger.debug("here on comment, utime = " + str(processing_from_time))
 
     # first, we create pool account and subaccounts for every active nominator
     # (because their balance and pending_balance exist)
@@ -236,6 +231,8 @@ async def handle_nominator_pool(
 
     res_from_pool = await origin_conn.execute(query_msgs_from_pool)
     msgs_from_pool = res_from_pool.all()
+
+    logger.debug("here after query")
 
     bookings = []
     withdrawal_requests = {}
@@ -311,8 +308,9 @@ async def handle_nominator_pool(
         # end of function
 
     tasks = []
+    logger.debug("here on txs to pool, " + str(len(msgs_to_pool)))
     for msg, body, descr, block_seqno in msgs_to_pool:
-        # logger.debug(f"     new tx (to) with lt {msg.created_lt} at {msg.created_at}")
+        logger.debug(f"     new tx (to) with lt {msg.created_lt} at {msg.created_at}")
         try:
             exit_code = (  # bitwise or to catch any other than 0
                 descr["compute_ph"]["exit_code"] | descr["action"]["result_code"]

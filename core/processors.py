@@ -1,27 +1,25 @@
+from typing import NamedTuple
+
 from loguru import logger
 from pytoniq.liteclient import LiteClient
 
-from handlers.handler_types import DBSession
 from handlers import handlers
+from handlers.handler_types import DBSession, HandlerArgs
+
+
+class CallHandlerArgs(NamedTuple):
+    handler_args: HandlerArgs
+    code_hash: str
 
 
 async def call_handler(
-    code_hash: str,
-    origin_db: DBSession,
-    result_db: DBSession,
-    address: str,
-    balance: int,
-    data_hash: str,
-    client: LiteClient,
-    utime: int,
+    args: CallHandlerArgs,
 ):
-    if code_hash in handlers:
-        handler_function = handlers[code_hash]
-        await handler_function(
-            origin_db, result_db, address, balance, data_hash, client, utime
-        )
+    if args.code_hash in handlers:
+        handler_function = handlers[args.code_hash]
+        await handler_function(args.handler_args)
     else:
         pass
         logger.error(
-            f"Handler not found for code hash: {code_hash}",
+            f"Handler not found for code hash: {args.code_hash}",
         )

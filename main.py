@@ -1,7 +1,9 @@
 import asyncio
+import functools
 import json
 import os
 import sys
+from time import time
 
 import aiometer
 from dotenv import load_dotenv
@@ -13,9 +15,10 @@ from sqlalchemy.schema import CreateSchema
 from contracts_db.database import Base as ContractsBase
 from core.connections import SessionMaker_Origin, SessionMaker_Result, engine_result
 from core.localdb import localdb
-from core.processors import call_handler
+from core.processors import CallHandlerArgs, call_handler
 from core.settings import settings
 from handlers import handlers as contract_handlers
+from handlers.handler_types import HandlerArgs
 from mainnet_db.database import LatestAccountState
 
 load_dotenv()
@@ -72,43 +75,74 @@ async def run():
         all_accounts = res.all()
         logger.warning(f"Found {len(all_accounts)} accounts of described types.")
 
-    tasks = []  # gathering buffer
+    # tasks = []  # gathering buffer
     processing_timestamp = 0  # in case of error - save chunk's timestamp
+    argss = []
     for i, (account, balance, code_hash, data_hash, timestamp) in enumerate(
         all_accounts
     ):
-        tasks.append(
-            call_handler(
-                code_hash,
-                SessionMaker_Origin,
-                SessionMaker_Result,
-                account,
-                balance,
-                data_hash,
-                lite_client,
-                localdb.index_second,
+        # tasks.append(
+        #     call_handler(
+        #         code_hash,
+        #         SessionMaker_Origin,
+        #         SessionMaker_Result,
+        #         account,
+        #         balance,
+        #         data_hash,
+        #         lite_client,
+        #         localdb.index_second,
+        #     )
+        # )
+        argss.append(
+            CallHandlerArgs(
+                handler_args=HandlerArgs(
+                    origin_db=SessionMaker_Origin,
+                    result_db=SessionMaker_Result,
+                    address=account,
+                    balance=balance,
+                    data_hash=data_hash,
+                    lite_client=lite_client,
+                    utime=localdb.index_second,
+                ),
+                code_hash=code_hash,
             )
         )
 
-        if not processing_timestamp:
-            processing_timestamp = timestamp - 1
+        # if not processing_timestamp:
+        #     processing_timestamp = timestamp - 1
 
-        if len(tasks) >= CHUNK_SIZE or i == len(all_accounts) - 1:
-            try:
-                pass
-            except Exception as e:
-                logger.error(
-                    "Something went wrong on indexing around timestamp",
-                    processing_timestamp,
-                )
-                logger.error(f"Saving second {processing_timestamp} to local db")
-                localdb.index_second = processing_timestamp
-                localdb.write()
-                processing_timestamp = 0
-                raise e
-            await asyncio.gather(*tasks)
-            tasks = []
-            processing_timestamp = 0
+        # if len(tasks) >= CHUNK_SIZE or i == len(all_accounts) - 1:
+        #     try:
+        #         pass
+        #     except Exception as e:
+        #         logger.error(
+        #             "Something went wrong on indexing around timestamp",
+        #             processing_timestamp,
+        #         )
+        #         logger.error(f"Saving second {processing_timestamp} to local db")
+        #         localdb.index_second = processing_timestamp
+        #         localdb.write()
+        #         processing_timestamp = 0
+        #         raise e
+        #     await asyncio.gather(*tasks)
+        #     tasks = []
+        #     processing_timestamp = 0
+
+    # await aiometer.run_on_each(call_handler, argss, max_at_once=CHUNK_SIZE)
+
+    done = 0
+    started_at = time()
+    async with aiometer.amap(
+        call_handler,
+        argss,
+        max_at_once=7,
+        max_per_second=50,
+    ) as results:
+        async for _ in results:
+            done += 1
+            elapsed = time() - started_at
+            speed = done / elapsed
+            logger.info(f"Processed {done}/{len(all_accounts)}, {speed:.2f}/sec")
 
     if all_accounts:
         last_timestamp = all_accounts[-1][4]
