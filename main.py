@@ -67,7 +67,7 @@ async def run():
             .order_by(LatestAccountState.timestamp)
             # .filter(  # DEBUG
             #     LatestAccountState.account
-            #     == "-1:1189458EEA400D0C5DC5B1A22EDA8DD009BABA5465B2A99C5145733C07D9916C"
+            #     == "-1:B06D6E005B6E55086DF5B2EDB38386CA809747F3BF82263ED55E3E6D820EA271"
             # )
         )
 

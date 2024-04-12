@@ -220,11 +220,16 @@ async def handle_nominator_pool(
         .join(Transaction, TransactionMessage.transaction_hash == Transaction.hash)
     )
     q = q.filter(Message.created_at > processing_from_time)
-    q = q.distinct(Message.created_lt)
+    # q = q.distinct(Message.created_lt)
     q = q.order_by(Message.created_lt)
 
-    query_msgs_to_pool = q.filter(Message.destination == pool_address_str)
-    query_msgs_from_pool = q.filter(Message.source == pool_address_str)
+    query_msgs_to_pool = q.filter(
+        Message.destination == pool_address_str, TransactionMessage.direction == "in"
+    )
+    # print("query_msgs_to_pool", query_msgs_to_pool)
+    query_msgs_from_pool = q.filter(
+        Message.source == pool_address_str, TransactionMessage.direction == "out"
+    )
 
     res_to_pool = await origin_conn.execute(query_msgs_to_pool)
     msgs_to_pool = res_to_pool.all()
@@ -312,16 +317,19 @@ async def handle_nominator_pool(
     for msg, body, descr, block_seqno in msgs_to_pool:
         logger.debug(f"     new tx (to) with lt {msg.created_lt} at {msg.created_at}")
         try:
-            exit_code = (  # bitwise or to catch any other than 0
-                descr["compute_ph"]["exit_code"] | descr["action"]["result_code"]
-            )
-        except:
+            # bitwise or to catch any other than 0
+            exit_code = descr["compute_ph"]["exit_code"]
+            action_code = 0
+            if "action" in descr:
+                action_code = descr["action"]["result_code"]
+
+        except Exception as e:
             logger.debug(
-                f"Failed to parse tx description at {msg.created_lt} on {pool_address_str}"
+                f"Failed to parse tx description at {msg.created_lt} on {pool_address_str}, {e}"
             )
             continue
 
-        if exit_code != 0:
+        if exit_code != 0 or action_code != 0:
             logger.debug(f"Failed tx: {exit_code} at {msg.created_lt}")
             continue
 
@@ -403,6 +411,7 @@ async def handle_nominator_pool(
         else:
             logger.debug(f"No requests from {msg.destination} in last 36 hours, skip")
             continue
+
         # if found:
         logger.info(
             "Found withdrawal msg from pool %s, amount %s, receiver %s at %s"
