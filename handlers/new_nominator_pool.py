@@ -300,17 +300,19 @@ async def handle_nominator_pool(
         for nominator, (balance, pending_balance) in _nominators_dict.items():
             share = balance / stake_amount_sent_before
             his_reward = int(share * nominators_reward)
+            if not his_reward:
+                continue
             bookings.append(
                 {
                     "lt": _msg.created_lt,
                     "utime": _msg.created_at,
                     "subaccount_address": nominator.to_str(False).upper(),
-                    "debit": his_reward,
-                    "credit": 0,
+                    "debit": 0,
+                    "credit": his_reward,
                     "type": "nominator_income",
                 }
             )
-        # end of function
+    # end of function
 
     tasks = []
     logger.debug("here on txs to pool, " + str(len(msgs_to_pool)))
@@ -349,8 +351,8 @@ async def handle_nominator_pool(
                         "lt": msg.created_lt,
                         "utime": msg.created_at,
                         "subaccount_address": msg.source,
-                        "debit": msg.value - 10**9,
-                        "credit": 0,
+                        "debit": 0,
+                        "credit": msg.value - 10**9,
                         "type": "nominator_deposit",
                     }
                 )
@@ -422,8 +424,8 @@ async def handle_nominator_pool(
                 "lt": msg.created_lt,
                 "utime": msg.created_at,
                 "subaccount_address": msg.destination,
-                "debit": 0,
-                "credit": msg.value,
+                "debit": msg.value,
+                "credit": 0,
                 "type": "nominator_withdrawal",
             }
         )

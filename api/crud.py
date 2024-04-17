@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Query, Session, aliased, contains_eager, selectinload
 
 from api.schemas import (
+    ActiveNominatorModel,
     BookingMinimalModel,
     BookingModel,
     EarningModel,
@@ -74,7 +75,11 @@ async def get_pool(
     for nom in nom_res:
         # balance, pending_balance > 0 - active
         if nom[1] > 0 or nom[2] > 0:
-            active_nominators.append(nom)
+            active_nominators.append(
+                ActiveNominatorModel(
+                    address=nom[0], balance=nom[1], pending_balance=nom[2]
+                )
+            )
         else:
             inactive_nominators.append(nom[0])
 
@@ -99,7 +104,11 @@ async def get_nominator_bookings(
 
     query = (
         select(
-            Booking.booking_utime, Booking.booking_type, Booking.credit, Booking.debit
+            # FIXME: swap credit and debit after reindex
+            Booking.booking_utime,
+            Booking.booking_type,
+            Booking.credit,
+            Booking.debit,
         )
         .select_from(Booking)
         .join(SubAccount, SubAccount.subaccount_id == Booking.subaccount_id)
@@ -139,7 +148,13 @@ async def get_nominator_earnings(
     if not from_time:
         from_time = 0
     bookings = await get_nominator_bookings(
-        session, nominator_address, pool_address, limit, 0, to_time
+        session,
+        nominator_address,
+        pool_address,
+        # assume that income records are at least a half of all bookings (not always true, but ok)
+        limit * 2,
+        0,
+        to_time,
     )
     if not bookings:
         return None
@@ -158,8 +173,12 @@ async def get_nominator_earnings(
                 )
             )
             total_income += booking.credit
+
         balance += booking.credit
         balance -= booking.debit
+
+        if len(earnings) >= limit:
+            break
 
     return EarningsModel(total_on_period=total_income, earnings=earnings)
 
@@ -175,7 +194,11 @@ async def get_pool_bookings(
 
     query = (
         select(
-            SubAccount.owner, Booking.booking_utime, Booking.booking_type, Booking.credit, Booking.debit
+            SubAccount.owner,
+            Booking.booking_utime,
+            Booking.booking_type,
+            Booking.credit,
+            Booking.debit,
         )
         .select_from(Booking)
         .join(SubAccount, SubAccount.subaccount_id == Booking.subaccount_id)
@@ -201,4 +224,3 @@ async def get_pool_bookings(
             )
         )
     return res
-
