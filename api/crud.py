@@ -104,11 +104,10 @@ async def get_nominator_bookings(
 
     query = (
         select(
-            # FIXME: swap credit and debit after reindex
             Booking.booking_utime,
             Booking.booking_type,
-            Booking.credit,
             Booking.debit,
+            Booking.credit,
         )
         .select_from(Booking)
         .join(SubAccount, SubAccount.subaccount_id == Booking.subaccount_id)
