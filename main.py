@@ -32,6 +32,8 @@ logger.add(
     format="{time:YYYY-MM-DD at HH:mm:ss} | {file}:{line} | {level} | {message}",
     backtrace=True,
     diagnose=True,
+    rotation="1 GB",
+    compression="gz"
 )
 
 # use LS to get contracts' data
