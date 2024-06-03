@@ -21,7 +21,7 @@ from sqlalchemy.orm import selectinload
 
 from contracts_db.database import Account, Booking, Nominator, NominatorPool, SubAccount
 from core.utils import addr_hash_wc0_parse, empty_parse, nanostr
-from handlers.handler_types import DBSession
+from handlers.handler_types import DBSession, HandlerArgs
 from mainnet_db.database import (
     Block,
     Message,
@@ -72,24 +72,16 @@ def parse_pool(data: Cell):
     )
 
 
-async def handler(
-    origin_db: DBSession,
-    result_db: DBSession,
-    pool_address_str: str,
-    balance: int,
-    data_hash: str,
-    lite_client: LiteClient,
-    utime: int,
-):
-    async with origin_db() as origin_conn, result_db() as result_conn:
+async def handler(args: HandlerArgs):
+    async with args.origin_db() as origin_conn, args.result_db() as result_conn:
         await handle_nominator_pool(
             origin_conn,
             result_conn,
-            pool_address_str,
-            balance,
-            data_hash,
-            lite_client,
-            utime,
+            args.address,
+            args.balance,
+            args.data_hash,
+            args.lite_client,
+            args.utime,
         )
 
 
@@ -166,23 +158,25 @@ async def handle_nominator_pool(
     await result_conn.commit()
     logger.info("Updated pool " + pool_address_str)
 
+    logger.debug("here on nominators_cell")
     # then additional value checks
     if not nominators_cell:
         logger.info("No nominators_cell in pool " + pool_address_str)
+        nominators_dict = None
         # await delete_pool_with_nominators()
-        return
+    else:
+        nominators_dict = HashMap.parse(
+            dict_cell=nominators_cell.begin_parse(),
+            key_length=256,
+            key_deserializer=addr_hash_wc0_parse,
+            value_deserializer=nominator_value_parse,
+        )
+        if not nominators_dict:
+            logger.info("Invalid nominators_dict in pool " + pool_address_str)
+            # await delete_pool_with_nominators()
+            return
 
-    nominators_dict = HashMap.parse(
-        dict_cell=nominators_cell.begin_parse(),
-        key_length=256,
-        key_deserializer=addr_hash_wc0_parse,
-        value_deserializer=nominator_value_parse,
-    )
-    if not nominators_dict:
-        logger.info("Invalid nominators_dict in pool " + pool_address_str)
-        # await delete_pool_with_nominators()
-        return
-
+    logger.debug("here on withdraw_requests_cell")
     if withdraw_requests_cell:
         # using as list, with no meaningful value
         # requested_withdrawals#_ _:(HashmapE 256 Cell) = WithdrawalRequests; // addr -> none
@@ -196,6 +190,7 @@ async def handle_nominator_pool(
             logger.info("Invalid withdraw_requests in pool " + pool_address_str)
             # await delete_pool_with_nominators()
             return
+    logger.debug("here on comment, utime = " + str(processing_from_time))
 
     # first, we create pool account and subaccounts for every active nominator
     # (because their balance and pending_balance exist)
@@ -225,17 +220,24 @@ async def handle_nominator_pool(
         .join(Transaction, TransactionMessage.transaction_hash == Transaction.hash)
     )
     q = q.filter(Message.created_at > processing_from_time)
-    q = q.distinct(Message.created_lt)
+    # q = q.distinct(Message.created_lt)
     q = q.order_by(Message.created_lt)
 
-    query_msgs_to_pool = q.filter(Message.destination == pool_address_str)
-    query_msgs_from_pool = q.filter(Message.source == pool_address_str)
+    query_msgs_to_pool = q.filter(
+        Message.destination == pool_address_str, TransactionMessage.direction == "in"
+    )
+    # print("query_msgs_to_pool", query_msgs_to_pool)
+    query_msgs_from_pool = q.filter(
+        Message.source == pool_address_str, TransactionMessage.direction == "out"
+    )
 
     res_to_pool = await origin_conn.execute(query_msgs_to_pool)
     msgs_to_pool = res_to_pool.all()
 
     res_from_pool = await origin_conn.execute(query_msgs_from_pool)
     msgs_from_pool = res_from_pool.all()
+
+    logger.debug("here after query")
 
     bookings = []
     withdrawal_requests = {}
@@ -269,6 +271,9 @@ async def handle_nominator_pool(
         validator_share = res[5]
         nominators_before = res[9]
 
+        if not nominators_before:
+            return
+
         _nominators_dict = HashMap.parse(
             dict_cell=nominators_before.begin_parse(),
             key_length=256,
@@ -288,52 +293,66 @@ async def handle_nominator_pool(
         )
         logger.debug(f"Block time: {block.gen_utime}, income time: {_msg.created_at}")
 
-        logger.debug(
-            "Found income %s for %s nominators"
-            % (nanostr(reward), len(_nominators_dict))
-        )
+        # logger.debug(
+        #     "Found income %s for %s nominators"
+        #     % (nanostr(reward), len(_nominators_dict))
+        # )
         for nominator, (balance, pending_balance) in _nominators_dict.items():
             share = balance / stake_amount_sent_before
             his_reward = int(share * nominators_reward)
+            if not his_reward:
+                continue
             bookings.append(
                 {
                     "lt": _msg.created_lt,
                     "utime": _msg.created_at,
                     "subaccount_address": nominator.to_str(False).upper(),
-                    "debit": his_reward,
-                    "credit": 0,
+                    "debit": 0,
+                    "credit": his_reward,
                     "type": "nominator_income",
                 }
             )
-        # end of function
+    # end of function
 
     tasks = []
+    logger.debug("here on txs to pool, " + str(len(msgs_to_pool)))
     for msg, body, descr, block_seqno in msgs_to_pool:
         logger.debug(f"     new tx (to) with lt {msg.created_lt} at {msg.created_at}")
         try:
-            exit_code = (  # bitwise or to catch any other than 0
-                descr["compute_ph"]["exit_code"] | descr["action"]["result_code"]
+            # bitwise or to catch any other than 0
+            exit_code = descr["compute_ph"]["exit_code"]
+            action_code = 0
+            if "action" in descr:
+                action_code = descr["action"]["result_code"]
+
+        except Exception as e:
+            logger.debug(
+                f"Failed to parse tx description at {msg.created_lt} on {pool_address_str}, {e}"
             )
-        except:
-            logger.debug(f"Failed to parse tx description: {descr}")
             continue
 
-        if exit_code != 0:
+        if exit_code != 0 or action_code != 0:
             logger.debug(f"Failed tx: {exit_code} at {msg.created_lt}")
             continue
 
         body_boc = Cell.from_boc(body)[0].begin_parse()
-        op = body_boc.load_uint(32)
+        try:
+            op = body_boc.load_uint(32)
+        except:
+            continue
         if op == 0:
-            first_letter = chr(body_boc.load_uint(8))[0]
+            try:
+                first_letter = chr(body_boc.load_uint(8))[0]
+            except:
+                continue
             if first_letter == "d":
                 bookings.append(
                     {
                         "lt": msg.created_lt,
                         "utime": msg.created_at,
                         "subaccount_address": msg.source,
-                        "debit": msg.value - 10**9,
-                        "credit": 0,
+                        "debit": 0,
+                        "credit": msg.value - 10**9,
                         "type": "nominator_deposit",
                     }
                 )
@@ -361,9 +380,9 @@ async def handle_nominator_pool(
         await asyncio.gather(*tasks)
 
     for msg, body, descr, block_seqno in msgs_from_pool:
-        logger.debug(
-            f"     new tx (from pool) with lt {msg.created_lt} at {msg.created_at}"
-        )
+        # logger.debug(
+        #     f"     new tx (from pool) with lt {msg.created_lt} at {msg.created_at}"
+        # )
         # pool sends withdrawals in bounceable mode
         if not msg.destination.startswith("0:"):
             continue
@@ -394,6 +413,7 @@ async def handle_nominator_pool(
         else:
             logger.debug(f"No requests from {msg.destination} in last 36 hours, skip")
             continue
+
         # if found:
         logger.info(
             "Found withdrawal msg from pool %s, amount %s, receiver %s at %s"
@@ -403,9 +423,9 @@ async def handle_nominator_pool(
             {
                 "lt": msg.created_lt,
                 "utime": msg.created_at,
-                "subaccount_address": msg.source,
-                "debit": 0,
-                "credit": msg.value,
+                "subaccount_address": msg.destination,
+                "debit": msg.value,
+                "credit": 0,
                 "type": "nominator_withdrawal",
             }
         )
@@ -434,36 +454,37 @@ async def handle_nominator_pool(
 
     # update active nominators
     new_active_nominators = []
-    for nominator, (balance, pending_balance) in nominators_dict.items():
-        nominator_raw = nominator.to_str(False).upper()
-        if not nominator_raw in all_subaccounts:
-            new_subaccount = SubAccount(
-                owner=nominator_raw,
-                subaccount_type="pool_nominator",
-                parent_account_id=pool_id_in_accouts,
-            )
-            result_conn.add(new_subaccount)
-            await result_conn.flush()  # for subaccount_id
+    if nominators_dict:
+        for nominator, (balance, pending_balance) in nominators_dict.items():
+            nominator_raw = nominator.to_str(False).upper()
+            if not nominator_raw in all_subaccounts:
+                new_subaccount = SubAccount(
+                    owner=nominator_raw,
+                    subaccount_type="pool_nominator",
+                    parent_account_id=pool_id_in_accouts,
+                )
+                result_conn.add(new_subaccount)
+                await result_conn.flush()  # for subaccount_id
 
-            new_nominator = Nominator(
-                subaccount_id=new_subaccount.subaccount_id,
-                balance=balance,
-                pending_balance=pending_balance,
-            )
-            result_conn.add(new_nominator)  # no flush here
+                new_nominator = Nominator(
+                    subaccount_id=new_subaccount.subaccount_id,
+                    balance=balance,
+                    pending_balance=pending_balance,
+                )
+                result_conn.add(new_nominator)  # no flush here
 
-            all_subaccounts[nominator_raw] = {
-                "subaccount": new_subaccount,
-                "nominator": new_nominator,
-            }
-        else:
-            # update data
-            all_subaccounts[nominator_raw]["nominator"].balance = balance
-            all_subaccounts[nominator_raw][
-                "nominator"
-            ].pending_balance = pending_balance
+                all_subaccounts[nominator_raw] = {
+                    "subaccount": new_subaccount,
+                    "nominator": new_nominator,
+                }
+            else:
+                # update data
+                all_subaccounts[nominator_raw]["nominator"].balance = balance
+                all_subaccounts[nominator_raw][
+                    "nominator"
+                ].pending_balance = pending_balance
 
-        new_active_nominators.append(nominator.to_str(False).upper())
+            new_active_nominators.append(nominator.to_str(False).upper())
 
     # make old active nominators inactive
     for nominator_addr in all_subaccounts:
