@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from time import time
+from progress.bar import IncrementalBar
 
 import aiometer
 from dotenv import load_dotenv
@@ -23,22 +24,10 @@ from mainnet_db.database import LatestAccountState
 
 load_dotenv()
 
-os.makedirs("logs", exist_ok=True)
-
-logger.add(
-    "logs/sci_{time}.log",
-    level="DEBUG",
-    # format="{time} {level} {message}",
-    format="{time:YYYY-MM-DD at HH:mm:ss} | {file}:{line} | {level} | {message}",
-    backtrace=True,
-    diagnose=True,
-    rotation="1 GB",
-    compression="gz"
-)
 
 # use LS to get contracts' data
-config = json.loads(open("vip-archive-config.json").read())
-lite_client = LiteClient.from_config(config, timeout=10)  # i=2 for mainnet config
+config = json.loads(open("tc-lsa-01-1.json").read())
+lite_client = LiteClient.from_config(config, timeout=30)  # i=2 for mainnet config
 
 print(contract_handlers.keys())
 
@@ -132,19 +121,26 @@ async def run():
 
     # await aiometer.run_on_each(call_handler, argss, max_at_once=CHUNK_SIZE)
 
+    
+    # the bar will be in stdout only
+    bar = IncrementalBar(f'Indexing from {localdb.index_second}', max=len(argss))
+
     done = 0
     started_at = time()
     async with aiometer.amap(
         call_handler,
         argss,
-        max_at_once=7,
-        max_per_second=50,
+        max_at_once=9,
+        max_per_second=3,
     ) as results:
         async for _ in results:
             done += 1
             elapsed = time() - started_at
             speed = done / elapsed
+            bar.next()
             logger.info(f"Processed {done}/{len(all_accounts)}, {speed:.2f}/sec")
+
+    bar.finish()
 
     if all_accounts:
         last_timestamp = all_accounts[-1][4]
@@ -187,4 +183,18 @@ async def main():
 
 
 if __name__ == "__main__":
+    os.makedirs("logs", exist_ok=True)
+
+    logger.remove()
+
+    logger.add(
+        "logs/sci_{time}.log",
+        level="DEBUG",
+        # format="{time} {level} {message}",
+        format="{time:YYYY-MM-DD at HH:mm:ss} | {file}:{line} | {level} | {message}",
+        backtrace=True,
+        diagnose=True,
+        rotation="1 GB",
+        compression="gz"
+    )
     asyncio.run(main())
