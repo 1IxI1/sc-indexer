@@ -31,7 +31,7 @@ lite_client = LiteClient.from_config(config, timeout=30)  # i=2 for mainnet conf
 
 print(contract_handlers.keys())
 
-PERIOD = 5
+PERIOD = 30
 CHUNK_SIZE = 5
 
 

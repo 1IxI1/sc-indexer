@@ -30,12 +30,16 @@ class Account(Base):
     account_type = mapped_column(AccountType)
     balance = mapped_column(BigInteger)
     updated_utime = mapped_column(Integer)  # timestamp
-
-    # nominators: Mapped[List["SubAccount"]] = relationship(
-    #     "SubAccount",
-    #     back_populates="account",
-    #     cascade="all, delete-orphan",
-    # )
+    subaccounts = relationship(
+        "SubAccount",
+        back_populates="account",
+        cascade="all, delete-orphan",
+    )
+    nominator_pool = relationship(
+        "NominatorPool",
+        back_populates="account",
+        cascade="all, delete-orphan",
+    )
 
 
 # This table contains list of virtual accounts
@@ -51,7 +55,13 @@ class SubAccount(Base):
     owner = mapped_column(String)  # address, public key or smth
     subaccount_type = mapped_column(SubAccountType)
     parent_account_id = mapped_column(BigInteger, ForeignKey("accounts.account_id"))
-
+    account = relationship("Account", back_populates="subaccounts")
+    bookings = relationship("Booking", back_populates="subaccount", cascade="all, delete-orphan")
+    nominator = relationship(
+        "Nominator",
+        back_populates="subaccount",
+        cascade="all, delete-orphan",
+    )
 
 # Where bookings for all the subaccounts
 # are stored together.
@@ -63,13 +73,14 @@ class Booking(Base):
 
     booking_id = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     booking_hash = mapped_column(String, primary_key=True)
-    account_id = mapped_column(BigInteger, ForeignKey("accounts.account_id"))
+    # account_id = mapped_column(BigInteger, ForeignKey("accounts.account_id"))
     subaccount_id = mapped_column(BigInteger, ForeignKey("subaccounts.subaccount_id"))
     booking_type = mapped_column(BookingType)
     booking_lt = mapped_column(BigInteger)
     booking_utime = mapped_column(Integer)
     credit = mapped_column(BigInteger)
     debit = mapped_column(BigInteger)
+    subaccount = relationship("SubAccount", back_populates="bookings")
 
 
 # SCHEME: account_types
@@ -87,6 +98,7 @@ class NominatorPool(Base):
     stake_amount_sent = mapped_column(BigInteger)
     validator_amount = mapped_column(BigInteger)
     nominators_count = mapped_column(Integer)
+    account = relationship("Account", back_populates="nominator_pool")
 
 
 # SCHEME: subaccount_types
@@ -102,6 +114,6 @@ class Nominator(Base):
         ForeignKey("subaccounts.subaccount_id"),
         primary_key=True,
     )
-
     balance = mapped_column(BigInteger)
     pending_balance = mapped_column(BigInteger)
+    subaccount = relationship("SubAccount", back_populates="nominator")

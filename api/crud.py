@@ -111,7 +111,7 @@ async def get_nominator_bookings(
         )
         .select_from(Booking)
         .join(SubAccount, SubAccount.subaccount_id == Booking.subaccount_id)
-        .join(Account, Account.account_id == Booking.account_id)
+        .join(Account, Account.account_id == SubAccount.parent_account_id)
     )
     query = query.filter(SubAccount.owner == nominator_address)
     query = query.filter(Account.account == pool_address)
@@ -122,16 +122,7 @@ async def get_nominator_bookings(
         query = query.filter(Booking.booking_utime <= to_time)
 
     bookings_raw = await session.execute(query)
-    res = []
-    for i in bookings_raw.all():
-        res.append(
-            BookingMinimalModel(
-                utime=i[0],
-                booking_type=i[1],
-                debit=i[2],
-                credit=i[3],
-            )
-        )
+    res = [BookingMinimalModel(utime=i[0], booking_type=i[1], debit=i[2], credit=i[3]) for i in bookings_raw.all()]
     return res
 
 
@@ -201,7 +192,7 @@ async def get_pool_bookings(
         )
         .select_from(Booking)
         .join(SubAccount, SubAccount.subaccount_id == Booking.subaccount_id)
-        .join(Account, Account.account_id == Booking.account_id)
+        .join(Account, Account.account_id == SubAccount.parent_account_id)
     )
     query = query.filter(Account.account == pool_address)
     query = query.order_by(Booking.booking_utime).limit(limit)
@@ -211,15 +202,5 @@ async def get_pool_bookings(
         query = query.filter(Booking.booking_utime <= to_time)
 
     bookings_raw = await session.execute(query)
-    res = []
-    for i in bookings_raw.all():
-        res.append(
-            BookingModel(
-                nominator_address=i[0],
-                utime=i[1],
-                booking_type=i[2],
-                debit=i[3],
-                credit=i[4],
-            )
-        )
+    res = [BookingModel(nominator_address=i[0], utime=i[1], booking_type=i[2], debit=i[3], credit=i[4]) for i in bookings_raw.all()]
     return res

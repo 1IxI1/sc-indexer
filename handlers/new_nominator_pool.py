@@ -4,7 +4,9 @@ With accounting.
 https://github.com/ton-blockchain/nominator-pool/
 """
 
+from typing import NamedTuple
 import asyncio
+import aiometer
 import base64
 import json
 import math
@@ -74,16 +76,18 @@ def parse_pool(data: Cell):
 
 async def handler(args: HandlerArgs):
     async with args.origin_db() as origin_conn, args.result_db() as result_conn:
-        await handle_nominator_pool(
-            origin_conn,
-            result_conn,
-            args.address,
-            args.balance,
-            args.data_hash,
-            args.lite_client,
-            args.utime,
-        )
-
+        try:
+            await handle_nominator_pool(
+                origin_conn,
+                result_conn,
+                args.address,
+                args.balance,
+                args.data_hash,
+                args.lite_client,
+                args.utime,
+            )
+        except Exception as e:
+            logger.error(f"Unknown error while handling pool {args.address} from {args.utime}: {e}")
 
 async def handle_nominator_pool(
     origin_conn: AsyncSession,
@@ -97,10 +101,18 @@ async def handle_nominator_pool(
 
     # use it to clean data if pool cannot be processed
     async def delete_pool_with_nominators():
-        query = delete(Nominator).filter_by(pool_address=pool_address_str)
-        await result_conn.execute(query)
-        query = delete(NominatorPool).filter_by(account=pool_address_str)
-        await result_conn.execute(query)
+        account_to_delete = await result_conn.execute(select(Account).filter(Account.account == pool_address_str))
+        account_to_delete = account_to_delete.scalars().first()
+        if account_to_delete:
+            await result_conn.delete(account_to_delete)
+            await result_conn.commit()
+            logger.warning(f"Account {pool_address_str} was deleted")
+        else:
+            logger.warning(f"Account {pool_address_str} not found in db to delete")
+        # query = delete(Nominator).filter_by(pool_address=pool_address_str)
+        # await result_conn.execute(query)
+        # query = delete(NominatorPool).filter_by(account=pool_address_str)
+        # await result_conn.execute(query)
 
     pool_address = Address(pool_address_str)
 
@@ -108,10 +120,15 @@ async def handle_nominator_pool(
         pool_account = await lite_client.get_account_state(pool_address)
         if not pool_account.state.state_init or not pool_account.state.state_init.data:
             raise Exception("No data in state init")
-    except Exception:
-        logger.info("No account state init was found for pool " + pool_address_str)
-        await delete_pool_with_nominators()
-        return
+    except Exception as e:
+        logger.warning(f"Error while getting account state for {pool_address_str}: {e}. Reconnectiong lite client")
+        await lite_client.reconnect()
+        try:
+            pool_account = await lite_client.get_account_state(pool_address)
+        except Exception as ee:
+            logger.warning(f"No account state init was found for pool {pool_address_str}, error: {e}")
+            await delete_pool_with_nominators()
+            return
 
     data = pool_account.state.state_init.data
 
@@ -158,7 +175,6 @@ async def handle_nominator_pool(
     await result_conn.commit()
     logger.info("Updated pool " + pool_address_str)
 
-    logger.debug("here on nominators_cell")
     # then additional value checks
     if not nominators_cell:
         logger.info("No nominators_cell in pool " + pool_address_str)
@@ -176,7 +192,6 @@ async def handle_nominator_pool(
             # await delete_pool_with_nominators()
             return
 
-    logger.debug("here on withdraw_requests_cell")
     if withdraw_requests_cell:
         # using as list, with no meaningful value
         # requested_withdrawals#_ _:(HashmapE 256 Cell) = WithdrawalRequests; // addr -> none
@@ -190,7 +205,6 @@ async def handle_nominator_pool(
             logger.info("Invalid withdraw_requests in pool " + pool_address_str)
             # await delete_pool_with_nominators()
             return
-    logger.debug("here on comment, utime = " + str(processing_from_time))
 
     # first, we create pool account and subaccounts for every active nominator
     # (because their balance and pending_balance exist)
@@ -237,20 +251,22 @@ async def handle_nominator_pool(
     res_from_pool = await origin_conn.execute(query_msgs_from_pool)
     msgs_from_pool = res_from_pool.all()
 
-    logger.debug("here after query")
-
     bookings = []
     withdrawal_requests = {}
 
-    async def process_recover_stake(_msg: Message, _block_seqno: int):
+    class MsgAndSeqno(NamedTuple):
+        msg: Message
+        block_seqno: int
+
+    async def process_recover_stake(args: MsgAndSeqno):
         assert (  # came from elector
-            _msg.source
+            args.msg.source
             == "-1:3333333333333333333333333333333333333333333333333333333333333333"
         )
 
         wc = -1
         shard = -9223372036854775808
-        prev_block_seqno = _block_seqno - 5  # 5 blocks before
+        prev_block_seqno = args.block_seqno - 5  # 5 blocks before
 
         q = select(Block).filter(Block.seqno == prev_block_seqno, Block.workchain == wc)
         res = await origin_conn.execute(q)
@@ -263,10 +279,15 @@ async def handle_nominator_pool(
         file_hash = base64.b64decode(block.file_hash)
 
         on_block = BlockIdExt(wc, shard, prev_block_seqno, root_hash, file_hash)
+        try:
+            res = await lite_client.run_get_method(
+                pool_address_str, "get_pool_data", [], on_block
+            )
+            logger.debug(f"Success run get_pool_data on {pool_address_str} on block {on_block.seqno}")
+        except:
+            logger.error(f"Failed to run get_pool_data on {pool_address_str} on block {on_block.seqno}")
+            return
 
-        res = await lite_client.run_get_method(
-            pool_address_str, "get_pool_data", [], on_block
-        )
         stake_amount_sent_before = res[2]
         validator_share = res[5]
         nominators_before = res[9]
@@ -284,14 +305,14 @@ async def handle_nominator_pool(
             logger.debug("No nominators at %s" % on_block)
             return
 
-        reward = _msg.value - stake_amount_sent_before
+        reward = args.msg.value - stake_amount_sent_before
         validator_reward = int(reward * validator_share / 10000)
         nominators_reward = reward - validator_reward
 
         logger.debug(
-            f"Value: {nanostr(_msg.value)}, stake: {nanostr(stake_amount_sent_before)}, reward: {nanostr(reward)}"
+            f"Value: {nanostr(args.msg.value)}, stake: {nanostr(stake_amount_sent_before)}, reward: {nanostr(reward)}"
         )
-        logger.debug(f"Block time: {block.gen_utime}, income time: {_msg.created_at}")
+        # logger.debug(f"Block time: {block.gen_utime}, income time: {args.msg.created_at}")
 
         # logger.debug(
         #     "Found income %s for %s nominators"
@@ -304,8 +325,8 @@ async def handle_nominator_pool(
                 continue
             bookings.append(
                 {
-                    "lt": _msg.created_lt,
-                    "utime": _msg.created_at,
+                    "lt": args.msg.created_lt,
+                    "utime": args.msg.created_at,
                     "subaccount_address": nominator.to_str(False).upper(),
                     "debit": 0,
                     "credit": his_reward,
@@ -314,10 +335,9 @@ async def handle_nominator_pool(
             )
     # end of function
 
-    tasks = []
-    logger.debug("here on txs to pool, " + str(len(msgs_to_pool)))
+    incomes_to_process = []
     for msg, body, descr, block_seqno in msgs_to_pool:
-        logger.debug(f"     new tx (to) with lt {msg.created_lt} at {msg.created_at}")
+        # logger.debug(f"     new tx (to) with lt {msg.created_lt} at {msg.created_at}")
         try:
             # bitwise or to catch any other than 0
             exit_code = descr["compute_ph"]["exit_code"]
@@ -371,13 +391,15 @@ async def handle_nominator_pool(
                 )
 
         elif op == 0xF96F7324:  # recover_stake_ok (i.e. income)
-            tasks.append(process_recover_stake(msg, block_seqno))
-            if len(tasks) >= 10:
-                await asyncio.gather(*tasks)
-                tasks = []
+            incomes_to_process.append(MsgAndSeqno(msg, block_seqno))
 
-    if tasks:
-        await asyncio.gather(*tasks)
+    async with aiometer.amap(
+        process_recover_stake,
+        incomes_to_process,
+        max_at_once=2,
+        max_per_second=1,
+    ) as results:
+        pass
 
     for msg, body, descr, block_seqno in msgs_from_pool:
         # logger.debug(
@@ -386,7 +408,7 @@ async def handle_nominator_pool(
         # pool sends withdrawals in bounceable mode
         if not msg.destination.startswith("0:"):
             continue
-        if descr["bounce"] is True:
+        if "bounce" in descr and descr["bounce"] is True:
             logger.debug(f"Bounceable, skip")
             continue
         # and it's more than 1 TON
@@ -535,7 +557,7 @@ async def handle_nominator_pool(
 
         booking = Booking(
             booking_hash=record_hash,
-            account_id=pool_id_in_accouts,
+            # account_id=pool_id_in_accouts,
             subaccount_id=subaccount_id,
             booking_lt=record["lt"],
             booking_utime=record["utime"],
