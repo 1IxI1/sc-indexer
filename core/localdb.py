@@ -13,7 +13,7 @@ class LocalDB:
     def read(self):
         if not os.path.exists(settings.lockfile):
             with open(settings.lockfile, "w") as f:
-                f.write("{}")
+                f.write('{"index_second": 0}')
         with open(settings.lockfile) as f:
             data = json.load(f)
             self.index_second = data["index_second"]
