@@ -1,6 +1,7 @@
 import json
 
 from core.settings import settings
+import os
 
 
 class LocalDB:
@@ -10,6 +11,9 @@ class LocalDB:
         self.read()
 
     def read(self):
+        if not os.path.exists(settings.lockfile):
+            with open(settings.lockfile, "w") as f:
+                f.write("{}")
         with open(settings.lockfile) as f:
             data = json.load(f)
             self.index_second = data["index_second"]
