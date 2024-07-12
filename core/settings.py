@@ -6,6 +6,7 @@ DOTENV = os.path.join(os.getcwd(), ".env")
 
 
 class Settings(BaseSettings):
+    config_path: str = "mainnet.json"
     db_user: str = ""
     db_password: str = ""
     db_origin_name: str = ""
