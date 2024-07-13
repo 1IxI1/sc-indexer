@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from contracts_db.database import Account, Booking, Nominator, NominatorPool, SubAccount
+from core import settings
 from core.utils import addr_hash_wc0_parse, empty_parse, nanostr
 from handlers.handler_types import DBSession, HandlerArgs
 from mainnet_db.database import (
@@ -122,11 +123,13 @@ async def handle_nominator_pool(
             raise Exception("No data in state init")
     except Exception as e:
         logger.warning(f"Error while getting account state for {pool_address_str}: {e}. Reconnectiong lite client")
-        await lite_client.reconnect()
+        config = json.loads(open(settings.config_path).read())
+        lite_client = LiteClient.from_config(config, timeout=30)
+        await lite_client.connect()
         try:
             pool_account = await lite_client.get_account_state(pool_address)
         except Exception as ee:
-            logger.warning(f"No account state init was found for pool {pool_address_str}, error: {e}")
+            logger.warning(f"No account state init was found for pool {pool_address_str}, error: {ee}")
             await delete_pool_with_nominators()
             return
 

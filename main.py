@@ -163,6 +163,7 @@ async def connect_db():
 
 
 async def main():
+    global lite_client
     logger.critical(
         "Starting Smart Contracts Indexer from %s db into %s db"
         % (settings.db_origin_name, settings.db_result_name)
@@ -171,11 +172,11 @@ async def main():
     await connect_db()
     await lite_client.connect()
 
-    res = await lite_client.run_get_method(
-        "-1:56CB0E4CDD07AD4A608E0A4F4A5972552139A63A16AA4A620E27056FE9F2C552",
-        "get_pool_data",
-        [],
-    )
+    # res = await lite_client.run_get_method(
+    #     "-1:56CB0E4CDD07AD4A608E0A4F4A5972552139A63A16AA4A620E27056FE9F2C552",
+    #     "get_pool_data",
+    #     [],
+    # )
 
     while True:
         await run()
