@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from contracts_db.database import Account, Booking, Nominator, NominatorPool, SubAccount
-from core import settings
+from core.settings import settings
 from core.utils import addr_hash_wc0_parse, empty_parse, nanostr
 from handlers.handler_types import DBSession, HandlerArgs
 from mainnet_db.database import (
@@ -32,7 +32,6 @@ from mainnet_db.database import (
     Transaction,
     TransactionMessage,
 )
-
 
 def nominator_value_parse(src: Slice) -> tuple[int, int]:
     # nominator#_ deposit:Coins pending_deposit:Coins = Nominator;
