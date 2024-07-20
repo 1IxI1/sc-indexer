@@ -189,13 +189,13 @@ if __name__ == "__main__":
     logger.remove()
 
     logger.add(
-        "logs/sci_{time}.log",
+        "logs/sci_{time:YYYY_MM_DD}.log",
         level="DEBUG",
         # format="{time} {level} {message}",
         format="{time:YYYY-MM-DD at HH:mm:ss} | {file}:{line} | {level} | {message}",
         backtrace=True,
         diagnose=True,
-        rotation="1 GB",
+        rotation="01:00",
         compression="gz"
     )
     asyncio.run(main())
