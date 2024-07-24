@@ -14,11 +14,11 @@ logger = logging.getLogger(__name__)
 
 
 settings = Settings()
-description = "TON Smart Contracts Indexer. Parses and stores the data of known smart contracts in TON into PostgreSQL."
+description = "TON Smart Contracts Indexer. Nominator pools, V2."
 app = FastAPI(
-    title="TON SC Indexer" if not settings.api_title else settings.api_title,
+    title="TON SC Indexer V2" if not settings.api_title else settings.api_title,
     description=description,
-    version="0.0.1",
+    version="0.0.2",
     # root_path=settings.api_root_path,
     docs_url=settings.api_root_path + "/",
     openapi_url=settings.api_root_path + "/openapi.json",
