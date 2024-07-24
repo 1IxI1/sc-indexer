@@ -121,8 +121,9 @@ async def handle_nominator_pool(
         if not pool_account.state.state_init or not pool_account.state.state_init.data:
             raise Exception("No data in state init")
     except Exception as e:
-        logger.warning(f"Error while getting account state for {pool_address_str}: {e}. Reconnectiong lite client")
-        config = json.loads(open(settings.config_path).read())
+        logger.warning(f"Error while getting account state for {pool_address_str}: {e}. Reconnecting lite client")
+        with open(settings.config_path) as config_file:
+            config = json.loads(config_file.read())
         lite_client = LiteClient.from_config(config, timeout=30)
         await lite_client.connect()
         try:

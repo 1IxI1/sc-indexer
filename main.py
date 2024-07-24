@@ -26,7 +26,8 @@ load_dotenv()
 
 
 # use LS to get contracts' data
-config = json.loads(open(settings.config_path).read())
+with open(settings.config_path) as config_file:
+    config = json.loads(config_file.read())
 lite_client = LiteClient.from_config(config, timeout=30)  # i=2 for mainnet config
 
 print(contract_handlers.keys())
