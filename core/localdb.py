@@ -17,10 +17,12 @@ class LocalDB:
         with open(settings.lockfile) as f:
             data = json.load(f)
             self.index_second = data["index_second"]
+            f.close()
 
     def write(self):
         with open(settings.lockfile, "w") as f:
             json.dump({"index_second": self.index_second}, f)
+            f.close()
 
 
 localdb = LocalDB()
