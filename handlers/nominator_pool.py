@@ -6,8 +6,8 @@ from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.orm import selectinload
 
 from contracts_db.database import Nominator, NominatorPool
-from handlers.handler_types import DBSession
 from core.utils import addr_hash_wc0_parse, empty_parse, nanostr, nominator_value_parse
+from handlers.handler_types import DBSession
 from mainnet_db.database import Message, MessageContent, Transaction, TransactionMessage
 
 

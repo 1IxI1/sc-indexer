@@ -4,11 +4,11 @@ import json
 import os
 import sys
 from time import time
-from progress.bar import IncrementalBar
 
 import aiometer
 from dotenv import load_dotenv
 from loguru import logger
+from progress.bar import IncrementalBar
 from pytoniq.liteclient import LiteClient
 from sqlalchemy import select, text
 from sqlalchemy.schema import CreateSchema
@@ -57,9 +57,15 @@ async def run():
             .filter(LatestAccountState.code_hash.in_(contract_types))
             .filter(LatestAccountState.timestamp > localdb.index_second)
             .order_by(LatestAccountState.timestamp)
-            # .filter(  # DEBUG
+            # .filter(  # DEBUG NOMINATORS
             #     LatestAccountState.account
             #     == "-1:B06D6E005B6E55086DF5B2EDB38386CA809747F3BF82263ED55E3E6D820EA271"
+            # )
+            # .filter(  # DEBUG DEDUST
+            #     LatestAccountState.account
+            #     # == "0:75A615A42E728E2FE1168953378049F3974B9E31B82050E6B44E11E3EC084857"
+            #     # == "0:BA0A49BD1059591A042A8A9DC896F64590287C7D8FFE3F7F55F69B90C1EE13FD"
+            #     == "0:42C0BA4709779E1401EFA928CAECE07AD5454F2F5E095CD8EDED0048DFA0F377"
             # )
         )
 
@@ -73,18 +79,6 @@ async def run():
     for i, (account, balance, code_hash, data_hash, timestamp) in enumerate(
         all_accounts
     ):
-        # tasks.append(
-        #     call_handler(
-        #         code_hash,
-        #         SessionMaker_Origin,
-        #         SessionMaker_Result,
-        #         account,
-        #         balance,
-        #         data_hash,
-        #         lite_client,
-        #         localdb.index_second,
-        #     )
-        # )
         argss.append(
             CallHandlerArgs(
                 handler_args=HandlerArgs(
@@ -100,31 +94,8 @@ async def run():
             )
         )
 
-        # if not processing_timestamp:
-        #     processing_timestamp = timestamp - 1
-
-        # if len(tasks) >= CHUNK_SIZE or i == len(all_accounts) - 1:
-        #     try:
-        #         pass
-        #     except Exception as e:
-        #         logger.error(
-        #             "Something went wrong on indexing around timestamp",
-        #             processing_timestamp,
-        #         )
-        #         logger.error(f"Saving second {processing_timestamp} to local db")
-        #         localdb.index_second = processing_timestamp
-        #         localdb.write()
-        #         processing_timestamp = 0
-        #         raise e
-        #     await asyncio.gather(*tasks)
-        #     tasks = []
-        #     processing_timestamp = 0
-
-    # await aiometer.run_on_each(call_handler, argss, max_at_once=CHUNK_SIZE)
-
-    
     # the bar will be in stdout only
-    bar = IncrementalBar(f'Indexing from {localdb.index_second}', max=len(argss))
+    bar = IncrementalBar(f"Indexing from {localdb.index_second}", max=len(argss))
 
     done = 0
     started_at = time()
@@ -173,12 +144,6 @@ async def main():
     await connect_db()
     await lite_client.connect()
 
-    # res = await lite_client.run_get_method(
-    #     "-1:56CB0E4CDD07AD4A608E0A4F4A5972552139A63A16AA4A620E27056FE9F2C552",
-    #     "get_pool_data",
-    #     [],
-    # )
-
     while True:
         await run()
         await asyncio.sleep(PERIOD)
@@ -187,16 +152,16 @@ async def main():
 if __name__ == "__main__":
     os.makedirs("logs", exist_ok=True)
 
-    logger.remove()
+    # logger.remove()
 
-    logger.add(
-        "logs/sci_{time:YYYY_MM_DD}.log",
-        level="DEBUG",
-        # format="{time} {level} {message}",
-        format="{time:YYYY-MM-DD at HH:mm:ss} | {file}:{line} | {level} | {message}",
-        backtrace=True,
-        diagnose=True,
-        rotation="01:00",
-        compression="gz"
-    )
+    # logger.add(
+    #     "logs/sci_{time:YYYY_MM_DD}.log",
+    #     level="DEBUG",
+    #     format="{time:YYYY-MM-DD at HH:mm:ss} | {file}:{line} | {level} | {message}",
+    #     backtrace=True,
+    #     diagnose=True,
+    #     rotation="01:00",
+    #     compression="gz",
+    # )
+
     asyncio.run(main())

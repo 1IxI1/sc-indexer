@@ -3,6 +3,7 @@
 Session.vim
 __pycache__/
 logs/
+playground/
 pyproject.toml
 testdb.py
 testlisten.py
