@@ -118,7 +118,7 @@ async def handle_stonfi_pool(
     )
     result_conn.add(lpool_account)
     await result_conn.flush()
-    lpool = LPool(account_id=lpool_account.account_id, pool_type="dedust")
+    lpool = LPool(account_id=lpool_account.account_id, pool_type="stonfi")
 
     asset0_subaccount = SubAccount(
         owner=asset0["addr"],
