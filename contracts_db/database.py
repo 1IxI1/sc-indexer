@@ -129,6 +129,11 @@ class LPool(Base):
     )
     pool_type = mapped_column(String)
     account = relationship("Account", back_populates="l_pool")
+    assets = relationship(
+        "LPoolAsset",
+        back_populates="l_pool",
+        cascade="all, delete-orphan",
+    )
 
 
 # SCHEME: subaccount_types
@@ -160,3 +165,4 @@ class LPoolAsset(Base):
     )
     jetton_symbol = mapped_column(String)
     subaccount = relationship("SubAccount", back_populates="l_pool_asset")
+    lpool = relationship("LPool", back_populates="assets")
