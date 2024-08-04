@@ -131,8 +131,9 @@ class LPool(Base):
     account = relationship("Account", back_populates="l_pool")
     assets = relationship(
         "LPoolAsset",
-        back_populates="l_pool",
+        back_populates="lpool",
         cascade="all, delete-orphan",
+        primaryjoin="LPool.account_id == LPoolAsset.subaccount_id",
     )
 
 
@@ -159,10 +160,12 @@ class LPoolAsset(Base):
     __table_args__ = {"schema": "subaccount_types"}
 
     subaccount_id = mapped_column(
-        BigInteger,
-        ForeignKey("subaccounts.subaccount_id"),
-        primary_key=True,
+        BigInteger, ForeignKey("subaccounts.subaccount_id"), primary_key=True
     )
     jetton_symbol = mapped_column(String)
     subaccount = relationship("SubAccount", back_populates="l_pool_asset")
-    lpool = relationship("LPool", back_populates="assets")
+    lpool = relationship(
+        "LPool",
+        back_populates="assets",
+        primaryjoin="LPoolAsset.subaccount_id == LPool.account_id",
+    )
