@@ -97,7 +97,7 @@ async def handle_stonfi_pool(
             # get symbol from origin db, from `jetton_masters`
             content_res = await origin_conn.execute(
                 select(JettonMaster.jetton_content).filter(
-                    JettonMaster.address == addr_raw
+                    JettonMaster.address == addr_raw.upper()
                 )
             )
             # it's jsonb
