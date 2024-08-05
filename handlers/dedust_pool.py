@@ -20,7 +20,7 @@ from sqlalchemy import and_, delete, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from contracts_db.database import Account, LPool, LPoolAsset, SubAccount
+from contracts_db.database import Account, LPool, LPoolAsset, LPoolWithAssets, SubAccount
 from core.settings import settings
 from core.utils import addr_hash_wc0_parse, empty_parse, nanostr
 from handlers.handler_types import DBSession, HandlerArgs
@@ -55,17 +55,17 @@ async def handle_dedust_pool(
     processing_from_time: int,
 ):
     account = await result_conn.execute(
-        select(Account).filter(Account.account == lpool_addr_str)
+        select(LPoolWithAssets).filter(LPoolWithAssets.account == lpool_addr_str)
     )
-    account = account.scalars().first()
-    if account:
+    existing = account.scalars().first()
+    if existing:
         logger.debug(f"LPool {lpool_addr_str} already exists")
         return
 
     # use it to clean data if lpool cannot be processed
     async def delete_lpool_with_tokens():
         account_to_delete = await result_conn.execute(
-            select(Account).filter(Account.account == lpool_addr_str)
+            select(LPoolWithAssets).filter(LPoolWithAssets.account == lpool_addr_str)
         )
         account_to_delete = account_to_delete.scalars().first()
         if account_to_delete:
@@ -121,6 +121,22 @@ async def handle_dedust_pool(
     asset1 = await parse_asset(res[1])
 
     # insert into db pool and assets
+
+    lpool_account = LPoolWithAssets(
+        account=lpool_addr_str,
+        lpool_type="dedust",
+        asset1_address=asset0["addr"],
+        asset1_symbol=asset0["symbol"],
+        asset2_address=asset1["addr"],
+        asset2_symbol=asset1["symbol"],
+        balance=balance,
+    )
+
+    result_conn.add(lpool_account)
+    await result_conn.commit()
+    logger.info(f"Lpool (dedust) {lpool_addr_str} was added")
+
+    return 
 
     lpool_account = Account(
         account=lpool_addr_str,

@@ -51,6 +51,18 @@ class Account(Base):
     # )
 
 
+class LPoolWithAssets(Base):
+    __tablename__ = "l_pool_with_assets"
+
+    account_id = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    account = mapped_column(String)
+    lpool_type = mapped_column(LPoolType)
+    asset1_address = mapped_column(String)
+    asset1_symbol = mapped_column(String)
+    asset2_address = mapped_column(String)
+    asset2_symbol = mapped_column(String)
+    balance = mapped_column(BigInteger)
+
 # This table contains list of virtual accounts
 # assigned to each account.
 #   For example, single account might in theory be
