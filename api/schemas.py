@@ -3,8 +3,6 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel
 
-from contracts_db.database import Nominator, NominatorPool
-
 logger = logging.getLogger(__name__)
 
 
@@ -49,6 +47,15 @@ class EarningModel(BaseModel):
 class EarningsModel(BaseModel):
     total_on_period: int
     earnings: List[EarningModel]
+
+class LPoolAssetModel(BaseModel):
+    address: str
+    symbol: str
+    reserve: int
+
+class LPoolModel(BaseModel):
+    type: str
+    assets: List[LPoolAssetModel]
 
 
 # class WalletModel(BaseModel):

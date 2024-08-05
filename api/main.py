@@ -6,7 +6,8 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.deps.apikey import api_key_dep
-from api.router import router as router_v1
+from api.dexes_router import router as router_dexes
+from api.nominator_router import router as router_nominators
 from core.settings import Settings
 
 logging.basicConfig(format="%(asctime)s %(module)-15s %(message)s", level=logging.INFO)
@@ -49,5 +50,15 @@ def startup():
 
 
 app.include_router(
-    router_v1, prefix=settings.api_root_path, include_in_schema=True, deprecated=False
+    router_nominators,
+    prefix=settings.api_root_path,
+    include_in_schema=True,
+    deprecated=True,
+)
+
+app.include_router(
+    router_dexes,
+    prefix=settings.api_root_path,
+    include_in_schema=True,
+    deprecated=False,
 )
