@@ -120,8 +120,10 @@ async def handle_stonfi_pool(
         lpool_type="stonfi",
         asset1_address=asset0["addr"],
         asset1_symbol=asset0["symbol"],
+        asset1_reserve=res[0],
         asset2_address=asset1["addr"],
         asset2_symbol=asset1["symbol"],
+        asset2_reserve=res[1],
         balance=balance,
     )
 

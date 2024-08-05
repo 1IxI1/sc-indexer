@@ -59,8 +59,10 @@ class LPoolWithAssets(Base):
     lpool_type = mapped_column(LPoolType)
     asset1_address = mapped_column(String)
     asset1_symbol = mapped_column(String)
+    asset1_reserve = mapped_column(BigInteger)
     asset2_address = mapped_column(String)
     asset2_symbol = mapped_column(String)
+    asset2_reserve = mapped_column(BigInteger)
     balance = mapped_column(BigInteger)
 
 # This table contains list of virtual accounts

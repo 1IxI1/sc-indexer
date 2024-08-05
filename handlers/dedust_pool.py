@@ -76,18 +76,20 @@ async def handle_dedust_pool(
             logger.warning(f"Account {lpool_addr_str} not found in db to delete")
 
     try:
-        res = await lite_client.run_get_method(lpool_addr_str, "get_assets", [])
+        res1 = await lite_client.run_get_method(lpool_addr_str, "get_assets", [])
+        res2 = await lite_client.run_get_method(lpool_addr_str, "get_reserves", [])
     except Exception as e:
         logger.error(f"Failed to run get_assets on {lpool_addr_str}: {e}")
         return
 
-    async def parse_asset(asset: Slice):
+    async def parse_asset(asset: Slice, reverve:int):
         # native$0000 = Asset;
         # jetton$0001 workchain_id:int8 address:uint256 = Asset;
         asset_type = asset.load_uint(4)
         if asset_type == 0:
             return {
                 "type": "ton",
+                "reserve": reverve,
                 "addr": "",
                 "symbol": "TON",
             }
@@ -111,14 +113,16 @@ async def handle_dedust_pool(
                 logger.error(f"Failed to get symbol for {addr}: {e}")
             return {
                 "type": "jetton",
+                "reserve": reverve,
+                "addr": "",
                 "addr": addr,
                 "symbol": symbol,
             }
         else:
             raise Exception(f"Unknown dedust asset type: {asset_type}")
 
-    asset0 = await parse_asset(res[0])
-    asset1 = await parse_asset(res[1])
+    asset0 = await parse_asset(res1[0], res2[0])
+    asset1 = await parse_asset(res1[1], res2[1])
 
     # insert into db pool and assets
 
@@ -127,8 +131,10 @@ async def handle_dedust_pool(
         lpool_type="dedust",
         asset1_address=asset0["addr"],
         asset1_symbol=asset0["symbol"],
+        asset1_reserve=asset0["reserve"],
         asset2_address=asset1["addr"],
         asset2_symbol=asset1["symbol"],
+        asset2_reserve=asset1["reserve"],
         balance=balance,
     )
 
