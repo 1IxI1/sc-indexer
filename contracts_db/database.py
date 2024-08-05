@@ -2,7 +2,7 @@ from typing import List, Optional
 
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column, relationship
-from sqlalchemy.types import BigInteger, Enum, Integer, String
+from sqlalchemy.types import BigInteger, Enum, Integer, Numeric, String
 
 Base = declarative_base()
 
@@ -59,11 +59,11 @@ class LPoolWithAssets(Base):
     lpool_type = mapped_column(LPoolType)
     asset1_address = mapped_column(String)
     asset1_symbol = mapped_column(String)
-    asset1_reserve = mapped_column(BigInteger)
+    asset1_reserve = mapped_column(Numeric)
     asset2_address = mapped_column(String)
     asset2_symbol = mapped_column(String)
-    asset2_reserve = mapped_column(BigInteger)
-    balance = mapped_column(BigInteger)
+    asset2_reserve = mapped_column(Numeric)
+    balance = mapped_column(Numeric)
 
 # This table contains list of virtual accounts
 # assigned to each account.
