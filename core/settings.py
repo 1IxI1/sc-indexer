@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     origin_cluster_addr: str = "localhost:5432"
     db_result_name: str = ""
     result_cluster_addr: str = "localhost:5432"
-    lockfile: str = "indexer-lock.json"
+    localdb_file: str = "index-data.db"
 
     api_root_path: str = ""
     api_title: str = ""
