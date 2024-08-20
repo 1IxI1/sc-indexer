@@ -400,7 +400,7 @@ async def handle_nominator_pool(
         process_recover_stake,
         incomes_to_process,
         max_at_once=2,
-        max_per_second=1,
+        max_per_second=2,
     ) as results:
         pass
 
