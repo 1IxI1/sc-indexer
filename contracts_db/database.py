@@ -10,7 +10,7 @@ WalletVersion = Enum("v1", "v2", "v3r1", "v3r2", "v4r2", name="wallet_version")
 AccountType = Enum("wallet", "nominator_pool", name="account_type")
 SubAccountType = Enum("pool_nominator", name="subaccount_type")  # to be extended
 BookingType = Enum(
-    "nominator_income", "nominator_deposit", "nominator_withdrawal", name="booking_type"
+    "nominator_income", "nominator_deposit", "nominator_withdrawal", "nominator_withdrawal_fwd_fee", name="booking_type"
 )
 
 

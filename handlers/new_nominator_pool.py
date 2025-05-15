@@ -122,10 +122,11 @@ async def handle_nominator_pool(
             raise Exception("No data in state init")
     except Exception as e:
         logger.warning(f"Error while getting account state for {pool_address_str}: {e}. Reconnecting lite client")
-        with open(settings.config_path) as config_file:
-            config = json.loads(config_file.read())
-        lite_client = LiteClient.from_config(config, timeout=30)
-        await lite_client.connect()
+        # with open(settings.config_path) as config_file:
+        #     config = json.loads(config_file.read())
+        # lite_client = LiteClient.from_config(config, timeout=30)
+        # await lite_client.connect()
+        await lite_client.reconnect()
         try:
             pool_account = await lite_client.get_account_state(pool_address)
         except Exception as ee:
@@ -261,6 +262,9 @@ async def handle_nominator_pool(
         msg: Message
         block_seqno: int
 
+    def muldiv(value, num, denom):
+        return int((value * num) / denom)
+
     async def process_recover_stake(args: MsgAndSeqno):
         assert (  # came from elector
             args.msg.source
@@ -321,9 +325,9 @@ async def handle_nominator_pool(
         #     "Found income %s for %s nominators"
         #     % (nanostr(reward), len(_nominators_dict))
         # )
+        total_nominators_balance = sum(balance for balance, _ in _nominators_dict.values())
         for nominator, (balance, pending_balance) in _nominators_dict.items():
-            share = balance / stake_amount_sent_before
-            his_reward = int(share * nominators_reward)
+            his_reward = muldiv(nominators_reward, balance, total_nominators_balance)            
             if not his_reward:
                 continue
             bookings.append(
@@ -426,8 +430,9 @@ async def handle_nominator_pool(
             continue
 
         if not msg.destination in withdrawal_requests:
-            logger.debug(f"No requests from {msg.destination}, skip")
-            continue
+            logger.debug(f"No requests from {msg.destination}, but fine")
+            withdrawal_requests[msg.destination] = [msg.created_at]
+            # continue
 
         # search for withdrawal request max 36 hours ago (2 rounds)
         min_at = msg.created_at - 36 * 3600
@@ -444,6 +449,19 @@ async def handle_nominator_pool(
             "Found withdrawal msg from pool %s, amount %s, receiver %s at %s"
             % (msg.source, msg.value, msg.destination, msg.created_at)
         )
+
+        bookings.append(
+            {
+                "lt": msg.created_lt,
+                "utime": msg.created_at,
+                "subaccount_address": msg.destination,
+                "debit": 10**7, # 0.01 TON fwd fee
+                "credit": 0,
+                "type": "nominator_withdrawal_fwd_fee",
+            }
+        )
+        logger.info(f"Added 0.01 TON fwd fee record for {msg.destination}")
+
         bookings.append(
             {
                 "lt": msg.created_lt,
