@@ -232,8 +232,8 @@ class Transaction(Base):
     )
     description = mapped_column(JSONB)
 
-    messages: Mapped[List["TransactionMessage"]] = relationship(
-        "TransactionMessage", back_populates="transaction"
+    messages: Mapped[List["Message"]] = relationship(
+        "Message", back_populates="transaction"
     )
     event: Mapped[Optional["Event"]] = relationship(
         "Event",
@@ -275,7 +275,17 @@ class Message(Base):
     import_fee: Mapped[int] = mapped_column(BigInteger)
     body_hash: Mapped[str] = mapped_column(String(44))
     init_state_hash: Mapped[Optional[str]] = mapped_column(String(44), nullable=True)
-
+    
+    tx_hash: Mapped[str] = mapped_column(String(44), ForeignKey("transactions.hash"), nullable=True)
+    direction: Mapped[str] = mapped_column(Enum("in", "out", name="msg_direction"), nullable=True)
+    
+    transaction = relationship(
+        "Transaction",
+        back_populates="messages",
+        foreign_keys=[tx_hash],
+        primaryjoin="Message.tx_hash == Transaction.hash"
+    )
+    
     transactions = relationship(
         "TransactionMessage",
         foreign_keys=[hash],
@@ -324,7 +334,7 @@ class TransactionMessage(Base):
     )
 
     transaction: Mapped["Transaction"] = relationship(
-        "Transaction", back_populates="messages"
+        "Transaction", foreign_keys=[transaction_hash]
     )
     # message = relationship("Message", back_populates="transactions")
     message: Mapped["Message"] = relationship(

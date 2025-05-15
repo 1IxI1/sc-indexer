@@ -234,19 +234,32 @@ async def handle_nominator_pool(
         )
         .select_from(Message)
         .join(MessageContent, Message.body_hash == MessageContent.hash)
-        .join(TransactionMessage, Message.hash == TransactionMessage.message_hash)
-        .join(Transaction, TransactionMessage.transaction_hash == Transaction.hash)
+        .outerjoin(TransactionMessage, Message.hash == TransactionMessage.message_hash)
+        .outerjoin(Transaction, 
+                  or_(
+                      Message.tx_hash == Transaction.hash,
+                      TransactionMessage.transaction_hash == Transaction.hash
+                  )
+                 )
     )
     q = q.filter(Message.created_at > processing_from_time)
     # q = q.distinct(Message.created_lt)
     q = q.order_by(Message.created_lt)
 
     query_msgs_to_pool = q.filter(
-        Message.destination == pool_address_str, TransactionMessage.direction == "in"
+        Message.destination == pool_address_str, 
+        or_(
+            Message.direction == "in",
+            TransactionMessage.direction == "in"
+        )
     )
-    # print("query_msgs_to_pool", query_msgs_to_pool)
+    
     query_msgs_from_pool = q.filter(
-        Message.source == pool_address_str, TransactionMessage.direction == "out"
+        Message.source == pool_address_str, 
+        or_(
+            Message.direction == "out",
+            TransactionMessage.direction == "out"
+        )
     )
 
     res_to_pool = await origin_conn.execute(query_msgs_to_pool)
