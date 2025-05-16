@@ -30,7 +30,6 @@ from mainnet_db.database import (
     Message,
     MessageContent,
     Transaction,
-    TransactionMessage,
 )
 
 def nominator_value_parse(src: Slice) -> tuple[int, int]:
@@ -122,17 +121,23 @@ async def handle_nominator_pool(
             raise Exception("No data in state init")
     except Exception as e:
         logger.warning(f"Error while getting account state for {pool_address_str}: {e}. Reconnecting lite client")
-        with open(settings.config_path) as config_file:
-            config = json.loads(config_file.read())
-        lite_client = LiteClient.from_config(config, timeout=30)
-        await lite_client.connect()
+        # with open(settings.config_path) as config_file:
+        #     config = json.loads(config_file.read())
+        # lite_client = LiteClient.from_config(config, timeout=30)
+        # await lite_client.connect()
+        await lite_client.reconnect()
         try:
             pool_account = await lite_client.get_account_state(pool_address)
         except Exception as ee:
             logger.warning(f"No account state init was found for pool {pool_address_str}, error: {ee}")
             await delete_pool_with_nominators()
             return
-
+        
+    if not pool_account.state.state_init or not pool_account.state.state_init.data:
+        logger.warning(f"No state init was found for pool {pool_address_str}")
+        await delete_pool_with_nominators()
+        return
+    
     data = pool_account.state.state_init.data
 
     (
@@ -228,24 +233,29 @@ async def handle_nominator_pool(
         select(
             Message,
             MessageContent.body,
-            Transaction.description,
+            Transaction.compute_exit_code,
+            Transaction.action_result_code,
+            Transaction.compute_success,
+            Transaction.action_success,
+            Transaction.bounce,
             Transaction.block_seqno,
         )
         .select_from(Message)
         .join(MessageContent, Message.body_hash == MessageContent.hash)
-        .join(TransactionMessage, Message.hash == TransactionMessage.message_hash)
-        .join(Transaction, TransactionMessage.transaction_hash == Transaction.hash)
+        .join(Transaction, Message.tx_hash == Transaction.hash)
     )
     q = q.filter(Message.created_at > processing_from_time)
     # q = q.distinct(Message.created_lt)
     q = q.order_by(Message.created_lt)
 
     query_msgs_to_pool = q.filter(
-        Message.destination == pool_address_str, TransactionMessage.direction == "in"
+        Message.destination == pool_address_str, 
+        Message.direction == "in"
     )
-    # print("query_msgs_to_pool", query_msgs_to_pool)
+    
     query_msgs_from_pool = q.filter(
-        Message.source == pool_address_str, TransactionMessage.direction == "out"
+        Message.source == pool_address_str, 
+        Message.direction == "out"
     )
 
     res_to_pool = await origin_conn.execute(query_msgs_to_pool)
@@ -260,6 +270,9 @@ async def handle_nominator_pool(
     class MsgAndSeqno(NamedTuple):
         msg: Message
         block_seqno: int
+
+    def muldiv(value, num, denom):
+        return int((value * num) / denom)
 
     async def process_recover_stake(args: MsgAndSeqno):
         assert (  # came from elector
@@ -312,20 +325,21 @@ async def handle_nominator_pool(
         validator_reward = int(reward * validator_share / 10000)
         nominators_reward = reward - validator_reward
 
-        logger.debug(
-            f"Value: {nanostr(args.msg.value)}, stake: {nanostr(stake_amount_sent_before)}, reward: {nanostr(reward)}"
-        )
+        # logger.debug(
+        #     f"Value: {nanostr(args.msg.value)}, stake: {nanostr(stake_amount_sent_before)}, reward: {nanostr(reward)}"
+        # )
         # logger.debug(f"Block time: {block.gen_utime}, income time: {args.msg.created_at}")
 
         # logger.debug(
         #     "Found income %s for %s nominators"
         #     % (nanostr(reward), len(_nominators_dict))
         # )
+        total_nominators_balance = sum(balance for balance, _ in _nominators_dict.values())
         for nominator, (balance, pending_balance) in _nominators_dict.items():
-            share = balance / stake_amount_sent_before
-            his_reward = int(share * nominators_reward)
+            his_reward = muldiv(nominators_reward, balance, total_nominators_balance)            
             if not his_reward:
                 continue
+            # logger.debug(f"Adding nominator income {his_reward} for {nominator.to_str(False).upper()} in pool {pool_address_str} at {args.msg.created_at}")
             bookings.append(
                 {
                     "lt": args.msg.created_lt,
@@ -339,23 +353,15 @@ async def handle_nominator_pool(
     # end of function
 
     incomes_to_process = []
-    for msg, body, descr, block_seqno in msgs_to_pool:
+    for msg, body, exit_code, action_code, compute_success, action_success, bounce_type, block_seqno in msgs_to_pool:
         # logger.debug(f"     new tx (to) with lt {msg.created_lt} at {msg.created_at}")
-        try:
-            # bitwise or to catch any other than 0
-            exit_code = descr["compute_ph"]["exit_code"]
-            action_code = 0
-            if "action" in descr:
-                action_code = descr["action"]["result_code"]
-
-        except Exception as e:
-            logger.debug(
-                f"Failed to parse tx description at {msg.created_lt} on {pool_address_str}, {e}"
-            )
+        
+        if exit_code != 0 or (action_code and action_code != 0):
+            logger.debug(f"Failed tx: exit_code={exit_code}, action_code={action_code} at {msg.created_lt}")
             continue
-
-        if exit_code != 0 or action_code != 0:
-            logger.debug(f"Failed tx: {exit_code} at {msg.created_lt}")
+        
+        if not compute_success or (action_code is not None and not action_success):
+            logger.debug(f"Transaction not successful: compute_success={compute_success}, action_success={action_success} at {msg.created_lt}")
             continue
 
         body_boc = Cell.from_boc(body)[0].begin_parse()
@@ -380,7 +386,7 @@ async def handle_nominator_pool(
                     }
                 )
                 logger.info(
-                    "Deposit with value %s at %s for %s on %s"
+                    "Deposit %s at %s for %s on %s"
                     % (nanostr(msg.value), msg.created_at, msg.source, pool_address_str)
                 )
 
@@ -389,7 +395,7 @@ async def handle_nominator_pool(
                     withdrawal_requests[msg.source] = []
                 withdrawal_requests[msg.source].append(msg.created_at)
                 logger.info(
-                    "Withdraw req at %s from %s on %s"
+                    "Withdraw reqest at %s from %s on %s"
                     % (msg.created_at, msg.source, pool_address_str)
                 )
 
@@ -400,20 +406,23 @@ async def handle_nominator_pool(
         process_recover_stake,
         incomes_to_process,
         max_at_once=2,
-        max_per_second=1,
+        max_per_second=2,
     ) as results:
         pass
 
-    for msg, body, descr, block_seqno in msgs_from_pool:
+    for msg, body, exit_code, action_code, compute_success, action_success, bounce_type, block_seqno in msgs_from_pool:
         # logger.debug(
         #     f"     new tx (from pool) with lt {msg.created_lt} at {msg.created_at}"
         # )
         # pool sends withdrawals in bounceable mode
         if not msg.destination.startswith("0:"):
             continue
-        if "bounce" in descr and descr["bounce"] is True:
-            logger.debug(f"Bounceable, skip")
+            
+        # bounce = enum ('negfunds', 'nofunds', 'ok')
+        if bounce_type != "ok":
+            logger.debug(f"Bounce type is {bounce_type}, skip")
             continue
+            
         # and it's more than 1 TON
         if msg.value < 10**9:
             logger.debug(f"Less than 1 TON ({nanostr(msg.value)}), skip")
@@ -426,8 +435,9 @@ async def handle_nominator_pool(
             continue
 
         if not msg.destination in withdrawal_requests:
-            logger.debug(f"No requests from {msg.destination}, skip")
-            continue
+            logger.debug(f"No requests from {msg.destination}, but fine")
+            withdrawal_requests[msg.destination] = [msg.created_at]
+            # continue
 
         # search for withdrawal request max 36 hours ago (2 rounds)
         min_at = msg.created_at - 36 * 3600
@@ -444,6 +454,19 @@ async def handle_nominator_pool(
             "Found withdrawal msg from pool %s, amount %s, receiver %s at %s"
             % (msg.source, msg.value, msg.destination, msg.created_at)
         )
+
+        bookings.append(
+            {
+                "lt": msg.created_lt,
+                "utime": msg.created_at,
+                "subaccount_address": msg.destination,
+                "debit": 10**7, # 0.01 TON fwd fee
+                "credit": 0,
+                "type": "nominator_withdrawal_fwd_fee",
+            }
+        )
+        logger.info(f"Added 0.01 TON fwd fee record for {msg.destination}")
+
         bookings.append(
             {
                 "lt": msg.created_lt,
@@ -569,7 +592,7 @@ async def handle_nominator_pool(
             debit=record["debit"],
         )
         result_conn.add(booking)
-
+        logger.debug(f"Added booking {record['type']} for {record['subaccount_address']} at {record['utime']}, debit: {record['debit']}, credit: {record['credit']}")
     await result_conn.commit()
 
 
