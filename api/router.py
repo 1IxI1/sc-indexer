@@ -24,6 +24,26 @@ async def get_db():
         yield db
 
 
+@router.get("/lifecheck", response_model=schemas.LifecheckModel)
+async def lifecheck_method(
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Check if there are any bookings in the last 19 hours.
+    Returns status "ok" if bookings exist, "dead" otherwise.
+    """
+    last_booking_time = await crud.get_last_booking(db)
+    seconds = 19 * 3600
+    current_time = int(datetime.now().timestamp())
+    check_time = current_time - seconds
+
+    return schemas.LifecheckModel(
+        status="ok" if last_booking_time > check_time else "dead",
+        last_booking_time=last_booking_time
+    )
+
+
+
 @router.get("/getNominator", response_model=List[schemas.NominatorModel])
 async def get_nominator_method(
     nominator: str = Query(

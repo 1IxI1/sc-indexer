@@ -8,6 +8,11 @@ from contracts_db.database import Nominator, NominatorPool
 logger = logging.getLogger(__name__)
 
 
+class LifecheckModel(BaseModel):
+    status: str
+    last_booking_time: int
+
+
 class NominatorModel(BaseModel):
     pool_address: str
     balance: int

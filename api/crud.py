@@ -204,3 +204,13 @@ async def get_pool_bookings(
     bookings_raw = await session.execute(query)
     res = [BookingModel(nominator_address=i[0], utime=i[1], booking_type=i[2], debit=i[3], credit=i[4]) for i in bookings_raw.all()]
     return res
+
+async def get_last_booking(session: AsyncSession) -> int:
+    query = (
+        select(Booking.booking_utime)
+        .order_by(Booking.booking_utime.desc())
+        .limit(1)
+    )
+    res = await session.execute(query)
+    booking_row = res.first()
+    return booking_row[0] if booking_row else 0
