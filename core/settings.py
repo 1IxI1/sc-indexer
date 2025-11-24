@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     api_root_path: str = ""
     api_title: str = ""
+    toncenter_api_key: str = ""
 
     @property
     def origin_dsn(self) -> str:

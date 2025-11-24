@@ -288,7 +288,7 @@ async def handle_nominator_pool(
         res = await origin_conn.execute(q)
         block = res.scalar()
         if not block:
-            logger.debug("No block at %s" % prev_block_seqno)
+            logger.info("No block at %s" % prev_block_seqno)
             return
 
         root_hash = base64.b64decode(block.root_hash)
@@ -318,7 +318,7 @@ async def handle_nominator_pool(
             value_deserializer=nominator_value_parse,
         )
         if not _nominators_dict:
-            logger.debug("No nominators at %s" % on_block)
+            logger.info("No nominators at %s" % on_block)
             return
 
         reward = args.msg.value - stake_amount_sent_before
@@ -420,9 +420,9 @@ async def handle_nominator_pool(
             
         # bounce = enum ('negfunds', 'nofunds', 'ok')
         if bounce_type != "ok":
-            logger.debug(f"Bounce type is {bounce_type}, skip")
-            continue
-            
+            logger.debug(f"Bounce type is {bounce_type}, msg hash {msg.tx_hash}")
+            # continue
+
         # and it's more than 1 TON
         if msg.value < 10**9:
             logger.debug(f"Less than 1 TON ({nanostr(msg.value)}), skip")

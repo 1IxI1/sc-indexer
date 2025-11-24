@@ -21,6 +21,11 @@ from core.settings import settings
 from handlers import handlers as contract_handlers
 from handlers.handler_types import HandlerArgs
 from mainnet_db.database import LatestAccountState
+from pytoniq_core.boc.hashmap import HashMap
+from pytoniq_core.boc import Address, Cell, Slice
+from core.utils import addr_hash_wc0_parse
+from handlers.new_nominator_pool import parse_pool
+
 
 load_dotenv()
 
@@ -59,7 +64,7 @@ async def run():
             .order_by(LatestAccountState.timestamp)
             # .filter(  # DEBUG
             #     LatestAccountState.account
-            #     == "-1:B06D6E005B6E55086DF5B2EDB38386CA809747F3BF82263ED55E3E6D820EA271"
+            #     == "-1:C3927B436211AF4556703A6928BA9232B78CC8AA2EF89563A42542411DB4830E"
             # )
         )
 
@@ -174,10 +179,37 @@ async def main():
     await lite_client.connect()
 
     # res = await lite_client.run_get_method(
-    #     "-1:56CB0E4CDD07AD4A608E0A4F4A5972552139A63A16AA4A620E27056FE9F2C552",
+    #     "-1:C3927B436211AF4556703A6928BA9232B78CC8AA2EF89563A42542411DB4830E",
     #     "get_pool_data",
     #     [],
     # )
+    res = await lite_client.get_account_state("-1:20429A7BA4A0FD1B306B72BDE3BBD7DA3E31161CF7AB859E2D1694A20E80D420")
+    if res.state.state_init and res.state.state_init.data:
+        (
+            state,
+            nominators_count,
+            stake_amount_sent,
+            validator_amount,
+            config,
+            nominators_cell,
+            withdraw_requests_cell,
+        ) = parse_pool(res.state.state_init.data)
+
+        def nominator_value_parse(src: Slice) -> tuple[int, int]:
+            # nominator#_ deposit:Coins pending_deposit:Coins = Nominator;
+            deposit = src.load_coins() or 0
+            pending_deposit = src.load_coins() or 0
+            return deposit, pending_deposit
+        
+        if nominators_cell:
+            nominators_dict = HashMap.parse(
+                dict_cell=nominators_cell.begin_parse(),
+                key_length=256,
+                key_deserializer=addr_hash_wc0_parse,
+                value_deserializer=nominator_value_parse,
+            )
+            print(nominators_dict)
+
 
     while True:
         await run()
